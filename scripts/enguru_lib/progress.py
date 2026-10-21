@@ -174,7 +174,7 @@ def _load_scope(repo, session):
 
 
 def _index(tm, banks):
-    concepts, questions, findings = {}, {}, []
+    concepts, questions, findings, finding_bank = {}, {}, [], {}
     for m in (tm or {}).get("modules", []):
         for c in m.get("concepts", []):
             concepts[c["id"]] = {"concept": c, "bank": TOPIC_REL}
@@ -183,8 +183,11 @@ def _index(tm, banks):
             concepts[c["id"]] = {"concept": c, "bank": rel}
         for q in b.get("questions", []):
             questions.setdefault(q["concept_id"], []).append(q)
-        findings.extend(b.get("findings", []))
-    return {"concepts": concepts, "questions": questions, "findings": findings}
+        for f in b.get("findings", []):
+            findings.append(f)
+            finding_bank[f["concept_id"]] = rel
+    return {"concepts": concepts, "questions": questions, "findings": findings,
+            "finding_bank": finding_bank}
 
 
 def _confirmed(idx):
@@ -483,6 +486,7 @@ def next_item(repo) -> dict:
         cid = f["concept_id"]
         if _finding_state(prog, cid)["status"] == "recheck" and _concept_status(prog, cid) != "retired":
             return {"action": "verify_fix", "concept_id": cid, "finding": f,
+                    "bank_path": idx["finding_bank"][cid],
                     "out_path": ".enguru/work/verdicts/fixcheck-%s.json" % cid}
 
     ladder = _next_ladder(prog, idx, session["id"])
@@ -609,6 +613,11 @@ def record(repo, rec) -> dict:
         prev = st.pop("prev_status", None) or "open"
         st["status"] = "fixed" if rec["fix_verdict"] == "fixed" else prev
         result = st["status"]
+    elif rec["question_kind"] == "finding" and rec["outcome"] == "skipped":
+        # A skipped ladder keeps its status and rung; answered-this-session keeps it
+        # from being served again until a later session.
+        _add_revisit(prog, cid)
+        result = _finding_state(prog, cid)["status"]
     elif rec["question_kind"] == "finding":
         st = prog["findings"].setdefault(cid, {"status": "open", "rung": 1})
         if rec.get("revealed"):

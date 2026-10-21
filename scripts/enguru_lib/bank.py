@@ -215,11 +215,39 @@ def _bank_concepts(data):
     return data["concepts"]
 
 
-def seal(repo, bank_path) -> None:
+def shape_problem(data, allow_topic_map=False):
+    """Why data is not a usable bank (or, if allowed, topic map), or None.
+    A cheap structural guard for the mutating commands, not full validation."""
+    def objs(v, key):
+        return isinstance(v, list) and all(isinstance(x, dict) and key in x for x in v)
+
+    if not isinstance(data, dict):
+        return "expected a JSON object"
+    if is_topic_map(data):
+        if not allow_topic_map:
+            return "this is a topic map, not a question bank"
+        mods = data["modules"]
+        if not isinstance(mods, list) or not all(
+                isinstance(m, dict) and objs(m.get("concepts"), "id") for m in mods):
+            return "malformed topic map: modules need concepts with ids"
+        return None
+    for section, key in (("concepts", "id"), ("questions", "id"), ("findings", "concept_id")):
+        if not objs(data.get(section), key):
+            return "malformed bank: '%s' must be a list of objects with '%s'" % (section, key)
+    if not all("concept_id" in q for q in data["questions"]):
+        return "malformed bank: every question needs 'concept_id'"
+    return None
+
+
+def seal(repo, bank_path, ids=None) -> None:
+    """Store evidence hashes; with ids, only for those concepts."""
     data = paths.read_json(bank_path)
     questions = data.get("questions", [])
     findings = data.get("findings", [])
+    only = set(ids) if ids is not None else None
     for c in _bank_concepts(data):
+        if only is not None and c["id"] not in only:
+            continue
         hashes = {}
         for ref in _concept_refs(c, questions, findings):
             f = ref.get("file")
@@ -308,6 +336,14 @@ def apply_verdicts(repo, bank_path) -> dict:
     data["concepts"] = [c for c in data["concepts"] if c["id"] not in drop_concepts]
     paths.atomic_write_json(Path(bank_path), data)
     return result
+
+
+def finding_of(bank_path, concept_id):
+    """The finding for concept_id in the bank, or None."""
+    for f in paths.read_json(bank_path)["findings"]:
+        if f["concept_id"] == concept_id:
+            return f
+    return None
 
 
 # --------------------------------------------------------------------- merge

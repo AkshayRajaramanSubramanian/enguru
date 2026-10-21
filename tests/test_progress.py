@@ -332,6 +332,7 @@ def test_stale_finding_marked_recheck_and_served_verify_fix(tmp_path):
     assert p["findings"]["f2"]["status"] == "recheck"
     item = progress.next_item(repo)
     assert item == {"action": "verify_fix", "concept_id": "f1", "finding": b["findings"][0],
+                    "bank_path": ".enguru/banks/diff/%s.json" % scope.range_id,
                     "out_path": ".enguru/work/verdicts/fixcheck-f1.json"}
     r = progress.record(repo, rec(s2["session_id"], "f1", kind="fix_check", qkind="finding",
                                   fix_verdict="fixed"))
@@ -695,4 +696,51 @@ def test_rebuild_of_topic_map_only_concept_targets_module_bank(tmp_path):
     restart(repo, digest.Scope("project"), None)
     item = progress.next_item(repo)
     assert item["action"] == "rebuild_concept" and item["concept_id"] == "c"
+    assert item["bank_path"] == ".enguru/banks/project/m1.json"
+
+
+def test_skipped_finding_keeps_status_and_rung_and_is_not_served_again(tmp_path):
+    b = make_bank(["c1"], [finding("f-crit", "critical", rungs=4)])
+    repo, scope, s = start_diff(tmp_path, b)
+    sid = s["session_id"]
+    progress.record(repo, rec(sid, "f-crit", None, "incorrect", kind="ladder_progress",
+                              qkind="finding", ladder_rung_reached=3, ladder_length=4))
+    r = progress.record(repo, rec(sid, "f-crit", None, "skipped", qkind="finding",
+                                  ladder_rung_reached=3, ladder_length=4))
+    assert r["concept_status"] == "in_progress"
+    p = load_progress(repo)
+    assert p["findings"]["f-crit"] == {"status": "in_progress", "rung": 3}
+    assert p["revisit"] == ["f-crit"]
+    assert p["answers"][-1]["outcome"] == "skipped"
+    item = progress.next_item(repo)
+    assert item["action"] == "ask" and item["question"]["concept_id"] == "c1"
+    answer_ask(repo, sid, item)
+    assert progress.next_item(repo)["action"] == "done"
+    out = progress.end_session(repo)
+    assert [u["concept_id"] for u in out["undisclosed_critical"]] == ["f-crit"]
+    assert out["scored_since_last_certificate"] == 1  # the skip is not scored
+    progress.start_session(repo, scope, "quick")
+    item = progress.next_item(repo)
+    assert item["action"] == "ladder" and item["concept_id"] == "f-crit"
+    assert item["rung"] == 3 and item["announce"] is False
+    finish_ladder(repo, load_progress(repo)["current"]["session_id"], "f-crit")
+    assert load_progress(repo)["revisit"] == []
+
+
+def test_verify_fix_bank_path_for_project_module(tmp_path):
+    repo = make_repo(tmp_path, [{"app.py": LINES}], ["init"])
+    c1 = concept("m1-c1")
+    tm = {"modules": [{"id": "m1", "title": "t", "concepts": [c1]}]}
+    write_bank(Path(repo) / ".enguru" / "banks" / "project" / "topic-map.json", tm)
+    b = make_bank(["m1-c1"], [finding("m1-f1")], scope_key="project:m1")
+    mp = Path(repo) / ".enguru" / "banks" / "project" / "m1.json"
+    write_bank(mp, b)
+    bank.seal(repo, mp)
+    s = progress.start_session(repo, digest.resolve_scope(repo, True, None, False), None)
+    finish_ladder(repo, s["session_id"], "m1-f1")
+    progress.end_session(repo)
+    (Path(repo) / "app.py").write_text(LINES + "edited\n")
+    progress.start_session(repo, digest.resolve_scope(repo, True, None, False), None)
+    item = progress.next_item(repo)
+    assert item["action"] == "verify_fix"
     assert item["bank_path"] == ".enguru/banks/project/m1.json"

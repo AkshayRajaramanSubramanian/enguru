@@ -94,6 +94,16 @@ def _load_bank_json(path):
         fail("state_corrupt", str(e))
 
 
+def _load_bank_shaped(path, allow_topic_map=False):
+    """Load a bank for a mutating command; exit 2 if it has the wrong shape."""
+    from enguru_lib import bank
+    data = _load_bank_json(path)
+    problem = bank.shape_problem(data, allow_topic_map)
+    if problem:
+        fail("state_corrupt", "%s: %s" % (path, problem))
+    return data
+
+
 def cmd_bank_validate(args):
     from enguru_lib import bank, paths
     repo = _repo_root(os.getcwd())
@@ -114,8 +124,9 @@ def cmd_bank_seal(args):
     from enguru_lib import bank
     repo = _repo_root(os.getcwd())
     path = _bank_path(repo, args.path)
-    _load_bank_json(path)
-    bank.seal(repo, path)
+    _load_bank_shaped(path, allow_topic_map=True)
+    ids = [i for i in args.ids.split(",") if i] if args.ids is not None else None
+    bank.seal(repo, path, ids)
     emit({"ok": True})
 
 
@@ -123,7 +134,7 @@ def cmd_bank_drop(args):
     from enguru_lib import bank
     repo = _repo_root(os.getcwd())
     path = _bank_path(repo, args.path)
-    _load_bank_json(path)
+    _load_bank_shaped(path)
     ids = [i for i in args.ids.split(",") if i]
     bank.drop_items(path, ids)
     emit({"ok": True, "dropped": ids})
@@ -133,8 +144,25 @@ def cmd_bank_apply_verdicts(args):
     from enguru_lib import bank
     repo = _repo_root(os.getcwd())
     path = _bank_path(repo, args.path)
-    _load_bank_json(path)
+    _load_bank_shaped(path)
     emit(bank.apply_verdicts(repo, path))
+
+
+def cmd_bank_finding(args):
+    from enguru_lib import bank, paths
+    repo = _repo_root(os.getcwd())
+    path = _bank_path(repo, args.path)
+    _load_bank_shaped(path)
+    f = bank.finding_of(path, args.concept_id)
+    if f is None:
+        fail("state_corrupt", "no finding for concept %s in %s" % (args.concept_id, path))
+    out = _bank_path(repo, args.out)
+    state = (repo / ".enguru").resolve()
+    if state not in out.resolve().parents:
+        fail("state_corrupt", "--out must be inside .enguru/: %s" % args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    paths.atomic_write_json(out, f)
+    emit({"ok": True, "out": args.out})
 
 
 def cmd_bank_merge(args):
@@ -142,8 +170,8 @@ def cmd_bank_merge(args):
     repo = _repo_root(os.getcwd())
     path, part = _bank_path(repo, args.path), _bank_path(repo, args.partial)
     if path.exists():
-        _load_bank_json(path)
-    _load_bank_json(part)
+        _load_bank_shaped(path)
+    _load_bank_shaped(part)
     bank.merge_partial(path, part)
     emit({"ok": True})
 
@@ -237,6 +265,7 @@ def build_parser():
     v.set_defaults(func=cmd_bank_validate)
     sl = bk.add_parser("seal", help="store evidence hashes")
     sl.add_argument("path")
+    sl.add_argument("--ids", help="only rehash these concept ids (comma-separated)")
     sl.set_defaults(func=cmd_bank_seal)
     dr = bk.add_parser("drop", help="drop questions or concepts by id")
     dr.add_argument("path")
@@ -245,6 +274,11 @@ def build_parser():
     av = bk.add_parser("apply-verdicts", help="apply finding-verifier verdicts")
     av.add_argument("path")
     av.set_defaults(func=cmd_bank_apply_verdicts)
+    bf = bk.add_parser("finding", help="write one finding's JSON to a file")
+    bf.add_argument("path")
+    bf.add_argument("concept_id")
+    bf.add_argument("--out", required=True)
+    bf.set_defaults(func=cmd_bank_finding)
     bm = bk.add_parser("merge", help="merge a partial bank into a bank")
     bm.add_argument("path")
     bm.add_argument("partial")

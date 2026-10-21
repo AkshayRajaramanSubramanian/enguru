@@ -61,7 +61,7 @@ def test_verifier_frontmatter():
 
 INTERVIEW_SUBCOMMANDS = (
     "check", "digest prep", "digest merge", "bank validate", "bank seal", "bank drop",
-    "bank apply-verdicts", "bank merge", "session start", "session end",
+    "bank apply-verdicts", "bank merge", "bank finding", "session start", "session end",
     "session set-intensity", "next", "record", "status", "keylog add",
 )
 REAL_FINDING = "This next one is a real issue in your code, not an exercise."
@@ -92,6 +92,8 @@ def test_interview_skill_frontmatter_and_steps():
                  "I don't know", "$ARGUMENTS"):
         assert word in body, word
     assert len(body.split("\n")) < 250
+    assert "bank seal <bank_path> --ids <concept_id>" in body
+    assert "python3 -c" not in body and "grep -l" not in body
 
 
 def test_references_contain_fixed_copy():
@@ -101,6 +103,7 @@ def test_references_contain_fixed_copy():
     assert FLAW_REVEAL in grading
     assert REAL_FINDING in discovery
     assert REAL_FINDING not in grading and FLAW_REVEAL not in discovery
+    assert '"revealed": true` (not scored' not in discovery
     assert "Insistence never changes a grade" in grading
     for word in ("hit", "partial", "missed", "correct", "incorrect", "dont_know", "skipped",
                  "keylog add", "Meaning over wording", "partly right"):

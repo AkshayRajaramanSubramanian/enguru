@@ -77,7 +77,7 @@ Tell the developer in one line that you are reading their code (this can take a 
 
 ### `rebuild_concept`
 
-The concept's code changed (`reason: stale`) or its questions are used up (`reason: revisit`). Dispatch `enguru:project-analyst` with `mode: revisit`, `concept_id`, `bank_path`, `asked_question_ids`, `topic_map_path: .enguru/banks/project/topic-map.json`, `digest_path`, `out_path`, `keylog_path`. The analyst writes a partial bank to `out_path`. Validate the partial (below, but without the final seal), then `enguru bank merge <bank_path> <out_path>`, then `enguru bank seal <bank_path>` (required, or the rebuilt concept can never be detected as stale). If the partial is still unusable after the retry, skip the merge and just call `next`; the CLI will not ask for that rebuild again this session.
+The concept's code changed (`reason: stale`) or its questions are used up (`reason: revisit`). Dispatch `enguru:project-analyst` with `mode: revisit`, `concept_id`, `bank_path`, `asked_question_ids`, `topic_map_path: .enguru/banks/project/topic-map.json`, `digest_path`, `out_path`, `keylog_path`. The analyst writes a partial bank to `out_path`. Validate the partial (below, but without the final seal), then `enguru bank merge <bank_path> <out_path>`, then `enguru bank seal <bank_path> --ids <concept_id>` (required, or the rebuilt concept can never be detected as stale; `--ids` leaves the other concepts' staleness alone). If the partial is still unusable after the retry, skip the merge and just call `next`; the CLI will not ask for that rebuild again this session.
 
 ### Validate (after every analyst run)
 
@@ -86,16 +86,16 @@ The concept's code changed (`reason: stale`) or its questions are used up (`reas
 3. Still failing:
    - Problems on specific ids (not `$`): `enguru bank drop <out_path> --ids id1,id2` (a topic map cannot be dropped from; treat it like the next case).
    - Whole-file problems (`$`, missing file) or a failing topic map: tell the developer this part could not be built, then go to step 6 (end).
-4. `enguru bank seal <out_path>` (for a full bank or topic map; for a partial, seal the target bank after the merge instead).
+4. `enguru bank seal <out_path>` (a full seal, for a freshly built bank or topic map; for a partial, seal the target bank with `--ids` after the merge instead).
 
 Never show a question that has not passed validation; the CLI only serves sealed banks.
 
 ### `verify_findings`
 
-New candidate findings need an independent check. For the action's `bank_path` and `concept_ids`, first extract each finding to its own file without printing anything:
+New candidate findings need an independent check. For each of the action's `concept_ids`, write the finding to its own file (nothing is printed but `{ok, out}`):
 
 ```
-python3 -c 'import json,os,sys; b=json.load(open(sys.argv[1])); os.makedirs(".enguru/work/findings",exist_ok=True); [json.dump(f,open(".enguru/work/findings/%s.json"%f["concept_id"],"w")) for f in b["findings"] if f["concept_id"] in sys.argv[2:]]' <bank_path> <concept_id> ...
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py" bank finding <bank_path> <concept_id> --out .enguru/work/findings/<concept_id>.json
 ```
 
 Then dispatch one `enguru:finding-verifier` per concept id, **all in one message**: `mode: verify`, `finding_json: .enguru/work/findings/<concept_id>.json`, `out_path: .enguru/work/verdicts/<concept_id>.json`. Then `enguru bank apply-verdicts <bank_path>` (confirmed findings go to guided discovery; refuted ones are dropped; uncertain or failed ones become ordinary quiz concepts). Do not tell the developer what was found. Call `next`.
@@ -110,7 +110,7 @@ A confirmed finding's code changed. Dispatch `enguru:finding-verifier` with `mod
  "range_id": <range_id or null>, "intensity": <intensity or null>, "timestamp": "<UTC>"}
 ```
 
-(If the verifier wrote nothing usable, use `uncertain`.) Then `enguru bank seal` the bank that holds the concept: in diff scope `.enguru/banks/diff/<range_id>.json`; in project scope the file printed by `grep -l '"<concept_id>"' .enguru/banks/project/*.json | grep -v topic-map.json` (file names only). If `fixed`, tell the developer in one line that the earlier real issue in that file is now fixed. Call `next`.
+(If the verifier wrote nothing usable, use `uncertain`.) Then `enguru bank seal <bank_path> --ids <concept_id>` with the action's `bank_path`, so the concept is not rechecked again until its code changes. If `fixed`, tell the developer in one line that the earlier real issue in that file is now fixed. Call `next`.
 
 ### `ask`
 

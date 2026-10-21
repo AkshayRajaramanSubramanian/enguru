@@ -63,7 +63,7 @@ If the developer is still stuck after the final rung (`rung == ladder_length`), 
 
 ## 5. Skip and stop
 
-- **`skip`:** do not explain anything. Record the section 3 record with `"outcome": "skipped"`, `"ladder_rung_reached": <current rung>`, `"fix_valid": null`, `"revealed": true` (not scored; the finding goes back to the queue for a later session, from the first rung). Call `next`.
+- **`skip`:** do not explain anything. Record the section 3 record with `"outcome": "skipped"`, `"ladder_rung_reached": <current rung>`, `"fix_valid": null`, `"revealed": false`. It is not scored, keeps the rung reached, and the finding comes back in a later session at that rung. Call `next`.
 - **`stop`:** every rung reached is already recorded; go to the end step.
 
 ## 6. Disclosure at session end
