@@ -1,0 +1,59 @@
+{
+  "type": "object",
+  "properties": {
+    "chunk_id": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "turns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant",
+              "tool"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "text",
+          "files",
+          "errors"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "chunk_id",
+    "session_id",
+    "turns"
+  ],
+  "additionalProperties": false
+}

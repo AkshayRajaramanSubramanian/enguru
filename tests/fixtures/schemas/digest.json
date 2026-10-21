@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "meta": {
+    "scope": "project",
+    "range_id": null,
+    "sessions_found": 1,
+    "sessions_used": 1,
+    "events_kept": 1,
+    "events_dropped": 0,
+    "fallback_chunks": [],
+    "skipped_lines": 0,
+    "truncation": [],
+    "event_counts": {
+      "choice": 1
+    }
+  },
+  "file_map": {},
+  "git": {},
+  "events": [
+    {
+      "id": "ev-1",
+      "label": "choice",
+      "paraphrase": "p",
+      "files": [
+        "a.py"
+      ],
+      "session_id": null,
+      "timestamp": "2026-01-01T00:00:00Z",
+      "source": {
+        "commit": "abc"
+      },
+      "origin": "rules"
+    }
+  ],
+  "diff": null
+}

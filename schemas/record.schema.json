@@ -1,0 +1,141 @@
+{
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "answer",
+        "ladder_progress"
+      ]
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "concept_id": {
+      "type": "string"
+    },
+    "question_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "question_kind": {
+      "type": "string",
+      "enum": [
+        "quiz",
+        "finding"
+      ]
+    },
+    "style": {
+      "type": "string",
+      "enum": [
+        "explain_it",
+        "review_diff",
+        "spot_the_flaw",
+        "what_if"
+      ]
+    },
+    "skill": {
+      "type": "string",
+      "enum": [
+        "comprehension",
+        "review_judgment",
+        "defect_detection",
+        "systems_thinking"
+      ]
+    },
+    "difficulty": {
+      "type": "string",
+      "enum": [
+        "foundational",
+        "intermediate",
+        "advanced"
+      ]
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "correct",
+        "partial",
+        "incorrect",
+        "dont_know",
+        "skipped"
+      ]
+    },
+    "must_haves_hit": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      }
+    },
+    "misconception_stated": {
+      "type": "boolean"
+    },
+    "hints_used": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2
+    },
+    "followups_used": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3
+    },
+    "ladder_rung_reached": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "ladder_length": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "fix_valid": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "revealed": {
+      "type": "boolean"
+    },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "project",
+        "diff"
+      ]
+    },
+    "range_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "intensity": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "quick",
+        "thorough",
+        null
+      ]
+    },
+    "timestamp": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "session_id",
+    "concept_id",
+    "timestamp"
+  ],
+  "additionalProperties": false
+}

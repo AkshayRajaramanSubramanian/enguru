@@ -1,0 +1,16 @@
+{
+  "chunk_id": "k1",
+  "events": [
+    {
+      "label": "choice",
+      "paraphrase": "used X",
+      "files": [
+        "a.py"
+      ],
+      "confidence": 0.8,
+      "source_turn_ids": [
+        "t1"
+      ]
+    }
+  ]
+}

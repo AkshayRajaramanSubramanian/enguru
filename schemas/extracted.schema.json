@@ -1,0 +1,59 @@
+{
+  "type": "object",
+  "properties": {
+    "chunk_id": {
+      "type": "string"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "enum": [
+              "request",
+              "choice",
+              "pushback"
+            ]
+          },
+          "paraphrase": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "source_turn_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "label",
+          "paraphrase",
+          "files",
+          "confidence",
+          "source_turn_ids"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "chunk_id",
+    "events"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,107 @@
+{
+  "type": "object",
+  "properties": {
+    "modules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "concepts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "module": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "why_it_matters": {
+                  "type": "string"
+                },
+                "risk_tier": {
+                  "type": "integer",
+                  "enum": [
+                    1,
+                    2,
+                    3
+                  ]
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "quiz",
+                    "finding"
+                  ]
+                },
+                "evidence_refs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "file": {
+                        "type": "string"
+                      },
+                      "lines": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer"
+                        },
+                        "minItems": 2,
+                        "maxItems": 2
+                      },
+                      "commit": {
+                        "type": "string"
+                      },
+                      "event": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "evidence_hashes": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "id",
+                "module",
+                "title",
+                "why_it_matters",
+                "risk_tier",
+                "kind",
+                "evidence_refs",
+                "evidence_hashes"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 3,
+            "maxItems": 6
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "concepts"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 4,
+      "maxItems": 8
+    }
+  },
+  "required": [
+    "modules"
+  ],
+  "additionalProperties": false
+}

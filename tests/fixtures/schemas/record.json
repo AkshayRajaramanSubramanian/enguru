@@ -1,0 +1,25 @@
+{
+  "kind": "answer",
+  "session_id": "s1",
+  "concept_id": "c1",
+  "question_id": "q1",
+  "question_kind": "quiz",
+  "style": "explain_it",
+  "skill": "comprehension",
+  "difficulty": "foundational",
+  "outcome": "correct",
+  "must_haves_hit": [
+    0
+  ],
+  "misconception_stated": false,
+  "hints_used": 0,
+  "followups_used": 0,
+  "ladder_rung_reached": null,
+  "ladder_length": null,
+  "fix_valid": null,
+  "revealed": false,
+  "scope": "project",
+  "range_id": null,
+  "intensity": null,
+  "timestamp": "2026-01-01T00:00:00Z"
+}

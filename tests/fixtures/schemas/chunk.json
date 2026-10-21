@@ -1,0 +1,13 @@
+{
+  "chunk_id": "k1",
+  "session_id": "s1",
+  "turns": [
+    {
+      "id": "t1",
+      "role": "user",
+      "text": "hi",
+      "files": [],
+      "errors": []
+    }
+  ]
+}
