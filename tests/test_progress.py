@@ -445,7 +445,8 @@ def test_missing_diff_bank_requests_build(tmp_path):
     progress.start_session(repo, scope, "quick")
     assert progress.next_item(repo) == {
         "action": "build_diff_bank", "range_id": scope.range_id,
-        "out_path": ".enguru/banks/diff/%s.json" % scope.range_id,
+        "out_path": ".enguru/work/build-diff-%s.json" % scope.range_id,
+        "bank_path": ".enguru/banks/diff/%s.json" % scope.range_id,
         "digest_path": ".enguru/digest.json", "keylog_path": ".enguru/keylog.jsonl"}
 
 
@@ -474,7 +475,8 @@ def test_project_mode_topic_map_module_flow(tmp_path):
     assert s["module_id"] is None and s["intensity"] is None
     item = progress.next_item(repo)
     assert item == {"action": "build_topic_map",
-                    "out_path": ".enguru/banks/project/topic-map.json",
+                    "out_path": ".enguru/work/build-topic-map.json",
+                    "bank_path": ".enguru/banks/project/topic-map.json",
                     "digest_path": ".enguru/digest.json", "keylog_path": ".enguru/keylog.jsonl"}
     pdir = Path(repo) / ".enguru" / "banks" / "project"
     tm = {"modules": [{"id": "m1", "title": "M1", "concepts": [concept("a"), concept("b")]},
@@ -482,7 +484,8 @@ def test_project_mode_topic_map_module_flow(tmp_path):
     write_bank(pdir / "topic-map.json", tm)
     item = progress.next_item(repo)
     assert item == {"action": "build_module", "module_id": "m1",
-                    "out_path": ".enguru/banks/project/m1.json",
+                    "out_path": ".enguru/work/build-module-m1.json",
+                    "bank_path": ".enguru/banks/project/m1.json",
                     "digest_path": ".enguru/digest.json", "keylog_path": ".enguru/keylog.jsonl"}
     write_bank(pdir / "m1.json", make_bank(["a", "b"], per_concept=2, scope_key="project"))
     sid = s["session_id"]
@@ -744,3 +747,37 @@ def test_verify_fix_bank_path_for_project_module(tmp_path):
     item = progress.next_item(repo)
     assert item["action"] == "verify_fix"
     assert item["bank_path"] == ".enguru/banks/project/m1.json"
+
+
+def test_critical_finding_explained_by_last_resort_is_not_undisclosed(tmp_path):
+    b = make_bank([], [finding("f-crit", "critical"), finding("f-crit2", "critical")])
+    repo, scope, s = start_diff(tmp_path, b)
+    sid = s["session_id"]
+    progress.record(repo, rec(sid, "f-crit", None, "dont_know", qkind="finding",
+                              ladder_rung_reached=3, ladder_length=3, revealed=True))
+    assert load_progress(repo)["findings"]["f-crit"]["status"] == "open"
+    out = progress.end_session(repo)
+    assert [u["concept_id"] for u in out["undisclosed_critical"]] == ["f-crit2"]
+    s2 = progress.start_session(repo, scope, "quick")  # a later session that doesn't explain it
+    out = progress.end_session(repo)
+    assert sorted(u["concept_id"] for u in out["undisclosed_critical"]) == ["f-crit", "f-crit2"]
+
+
+def test_cli_bank_promote_only_moves_valid_builds(tmp_path):
+    repo = diff_repo(tmp_path)
+    work = Path(repo) / ".enguru" / "work" / "build-diff-x.json"
+    live = ".enguru/banks/diff/x.json"
+    bad = make_bank(["c1"])
+    bad["concepts"][0]["evidence_refs"] = [{"file": "gone.py", "lines": [1, 2]}]
+    write_bank(work, bad)
+    code, out = run_cli_raw(["bank", "promote", ".enguru/work/build-diff-x.json", live], repo)
+    assert code == 2 and out["error"] == "state_corrupt" and "gone.py" in out["message"]
+    assert work.exists() and not (Path(repo) / live).exists()
+    write_bank(work, make_bank(["c1"]))
+    bank.seal(repo, work)
+    out = run_cli(["bank", "promote", ".enguru/work/build-diff-x.json", live], repo)
+    assert out == {"ok": True, "bank_path": live}
+    assert not work.exists() and paths.read_json(Path(repo) / live)["concepts"][0]["evidence_hashes"]
+    write_bank(work, make_bank(["c1"]))
+    code, out = run_cli_raw(["bank", "promote", ".enguru/work/build-diff-x.json", "app.json"], repo)
+    assert code == 2 and out["error"] == "state_corrupt" and not (Path(repo) / "app.json").exists()

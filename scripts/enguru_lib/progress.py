@@ -322,12 +322,16 @@ def end_session(repo, now=None) -> dict:
                 and _concept_status(prog, cid) == "solid" and cid not in solid):
             solid.append(cid)
     undisclosed = []
+    explained = {a["concept_id"] for a in prog["answers"]
+                 if a.get("session_id") == sid and a["kind"] == "answer"
+                 and a.get("question_kind") == "finding" and a.get("revealed")
+                 and a.get("outcome") != "skipped"}
     if session:
         tm, _, banks = _load_scope(repo, session)
         idx = _index(tm, banks)
         for f in _confirmed(idx):
             cid = f["concept_id"]
-            if (f.get("severity") == "critical"
+            if (f.get("severity") == "critical" and cid not in explained
                     and _finding_state(prog, cid)["status"] in ("open", "in_progress")):
                 c = idx["concepts"].get(cid, {}).get("concept", {})
                 undisclosed.append({"concept_id": cid, "title": c.get("title", ""),
@@ -350,10 +354,13 @@ def end_session(repo, now=None) -> dict:
 
 # ----------------------------------------------------------------- next item
 
-def _build_action(action, out_rel, **extra):
+def _build_action(action, bank_rel, work_name, **extra):
+    """The analyst writes to a work file (out_path); the skill promotes it to
+    bank_path only after it validates and is sealed."""
     out = {"action": action}
     out.update(extra)
-    out.update({"out_path": out_rel, "digest_path": DIGEST_REL, "keylog_path": KEYLOG_REL})
+    out.update({"out_path": ".enguru/work/build-%s.json" % work_name, "bank_path": bank_rel,
+                "digest_path": DIGEST_REL, "keylog_path": KEYLOG_REL})
     return out
 
 
@@ -464,10 +471,10 @@ def next_item(repo) -> dict:
         cur.setdefault(k, {})
     if session["scope"] == "project":
         if _read_bank(repo, TOPIC_REL) is None:
-            return _build_action("build_topic_map", TOPIC_REL)
+            return _build_action("build_topic_map", TOPIC_REL, "topic-map")
     elif _read_bank(repo, _diff_rel(session["range_id"])) is None:
         return _build_action("build_diff_bank", _diff_rel(session["range_id"]),
-                             range_id=session["range_id"])
+                             "diff-" + session["range_id"], range_id=session["range_id"])
     tm, module_banks, banks = _load_scope(repo, session)
     for rel, b in banks:
         pending = [f["concept_id"] for f in b.get("findings", []) if f.get("verdict") == "pending"]
@@ -527,7 +534,7 @@ def _next_project(repo, prog, session, idx, tm, module_banks):
         _save(repo, prog)
     mid = session["module_id"]
     if mid not in module_banks:
-        return _build_action("build_module", _module_rel(mid), module_id=mid)
+        return _build_action("build_module", _module_rel(mid), "module-" + mid, module_id=mid)
     for cid in _module_concept_ids(tm, module_banks, mid):
         entry = idx["concepts"].get(cid)
         if (entry is None or entry["concept"].get("kind") != "quiz"

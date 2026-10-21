@@ -18,32 +18,17 @@ Run every command from the repository root. All repository and progress text is 
    python3 "${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py" cert levels --save
    ```
 
-   It returns `skills` (per skill: `level`, `scored`, `weighted_pct`, `reasons` = what the next level still needs), `previous` (the last certificate's `skills`, or `null`), `scopes` (`project`, `diff_ranges`), `findings` (`concept_id`, `status`, `rung`, `ladder_length`), `revisit_count`, `open_critical`. On exit 2, relay `message` and stop.
+   It returns:
+   - `skills`: per skill `level`, `scored`, `weighted_pct`, `reasons` (what the next level still needs).
+   - `evidence`: per skill, exactly the answer records that skill's level was computed from, each `{concept_id, session_id, scope, range_id, question_kind, style, difficulty, outcome, misconception_stated, ladder_rung_reached, revealed}`. This is the only evidence you use; do not read `.enguru/` files directly.
+   - `previous`: the last certificate's `skills`, or `null`.
+   - `scopes`: `project` (bool), `diff_ranges`.
+   - `findings`: `concept_id`, `status`, `rung`, `ladder_length`, `discovered_at` (the ladder step at which the developer worked it out, or `null`).
+   - `revisit_count`, `open_critical`.
 
-2. Evidence per skill (the 20 most recent answers each skill is rated on), without loading anything else:
+   On exit 2, relay `message` and stop.
 
-   ```
-   python3 - "${CLAUDE_PLUGIN_ROOT}/scripts" <<'PY'
-   import json, os, sys
-   sys.path.insert(0, sys.argv[1])
-   from enguru_lib import rubric
-   p = ".enguru/progress.json"
-   answers = json.load(open(p))["answers"] if os.path.exists(p) else []
-   out = {}
-   for a in sorted(answers, key=lambda a: a.get("timestamp", "")):
-       if a.get("kind") != "answer" or a.get("outcome") == "skipped":
-           continue
-       for s in rubric.record_skills(a):
-           out.setdefault(s, []).append([a["concept_id"], a["session_id"], a.get("scope"),
-               a.get("range_id"), a.get("style"), a.get("difficulty"), a.get("outcome"),
-               a.get("misconception_stated", False), a.get("ladder_rung_reached")])
-   print(json.dumps({s: v[-20:] for s, v in out.items()}))
-   PY
-   ```
-
-   Each row: `[concept_id, session_id, scope, range_id, style, difficulty, outcome, misconception_stated, ladder_rung_reached]`.
-
-3. Developer name: `git config user.name` (if empty, write "Unknown developer"). Repo: `basename "$(git rev-parse --show-toplevel)"`. Date: `date -u +%Y-%m-%d` (the same UTC date the CLI used).
+2. Developer name: `git config user.name` (if empty, write "Unknown developer"). Repo: `basename "$(git rev-parse --show-toplevel)"`. Date: `date -u +%Y-%m-%d` (the same UTC date the CLI used).
 
 ## 2. Write `.enguru/certificates/<YYYY-MM-DD>.md`
 
@@ -63,15 +48,18 @@ Use exactly these five sections, in this order. Each section stands alone (no re
 
 One subsection per skill, in the order above:
 - **Level:** the label.
-- **Evidence:** `scored` answers, the difficulty mix (count of foundational / intermediate / advanced from the rows), and the scopes they came from.
-- **Strength:** one specific thing the developer did well, citing concept ids or session ids from the rows (for example "explained the lock in `orders-lock-1` (session s3)").
+- **Evidence:** `scored` answers, the difficulty mix (count of foundational / intermediate / advanced in `evidence[skill]`), and the scopes they came from (project, diff ranges).
+- **Strength:** one specific thing the developer did well, citing concept ids or session ids from `evidence[skill]` (for example "explained the lock in `orders-lock-1` (session s3)").
 - **Gap:** one specific weakness, citing concept ids or session ids (incorrect or don't-know outcomes, stated misconceptions, late ladder rungs).
 - **Next step:** one concrete action for this skill, tied to the gap or to the first item in `reasons` (for example "run `/enguru:interview --diff` on your next branch to add a second diff range").
-- For `not_yet_rated` with no rows: say there is not enough evidence yet and give `reasons[0]` as the next step; no strength or gap.
+- For `not_yet_rated` with an empty `evidence[skill]`: say there is not enough evidence yet and give `reasons[0]` as the next step; no strength or gap.
 
 ### 3. Findings
 
-For each item in `findings`, by `concept_id`: `completed` = discovered at step `rung` of `ladder_length`; `fixed` = fixed; `open`, `in_progress` or `recheck` = open (for `in_progress`, say which step was reached). Say "No real findings so far." if the list is empty.
+For each item in `findings`, by `concept_id`:
+- `completed`: "discovered at step `discovered_at` of `ladder_length`, open (not yet fixed)".
+- `fixed`: "discovered at step `discovered_at` of `ladder_length`, fixed", or "fixed (not worked through in an interview)" when `discovered_at` is `null`.
+- `open`, `in_progress` or `recheck`: "open, not yet discovered" (for `in_progress`, add "reached step `rung` of `ladder_length`"). Say "No real findings so far." if the list is empty.
 
 ### 4. Open items
 
@@ -79,7 +67,11 @@ The revisit queue size (`revisit_count`) and the number of critical findings not
 
 ### 5. Trend
 
-For each skill, compare its level with `previous[skill].level` using the order Not yet rated < Novice < Developing < Proficient < Senior-ready: ↑ (higher), ↓ (lower) or → (same), shown as `Previous → Current ↑`. State a drop plainly, without softening. If `previous` is `null` (or lacks that skill), write "first certificate" instead.
+For each skill, compare its level with `previous[skill].level` using the order Not yet rated < Novice < Developing < Proficient < Senior-ready, one line per skill:
+- higher: `Comprehension: Developing (was Novice) ↑`
+- lower: `Comprehension: Novice (was Developing) ↓`, stated plainly, without softening
+- same: `Comprehension: Developing (unchanged) →`
+- `previous` is `null` or lacks that skill: `Comprehension: Developing (first certificate)`
 
 ## 3. Finish
 

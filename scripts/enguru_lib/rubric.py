@@ -162,7 +162,9 @@ def _skill_level(items, cfg):
     return out
 
 
-def skill_levels(records, cfg) -> dict:
+def windowed(records, cfg) -> dict:
+    """Per skill, the (record, score) pairs a level is computed from: the most
+    recent `window` scored answers, oldest first."""
     per = {s: [] for s in SKILLS}
     for rec in records:
         score = answer_score(rec, cfg)
@@ -170,11 +172,37 @@ def skill_levels(records, cfg) -> dict:
             continue
         for s in record_skills(rec):
             per[s].append((rec, score))
-    result = {}
     for s, items in per.items():
         items.sort(key=lambda it: it[0].get("timestamp", ""))
-        result[s] = _skill_level(items[-cfg["window"]:], cfg)
-    return result
+        per[s] = items[-cfg["window"]:]
+    return per
+
+
+def skill_levels(records, cfg) -> dict:
+    return {s: _skill_level(items, cfg) for s, items in windowed(records, cfg).items()}
+
+
+EVIDENCE_FIELDS = ("concept_id", "session_id", "scope", "range_id", "question_kind", "style",
+                   "difficulty", "outcome", "misconception_stated", "ladder_rung_reached",
+                   "revealed")
+
+
+def skill_evidence(records, cfg) -> dict:
+    """Per skill, the windowed answer records a level was computed from, trimmed
+    to the fields the certificate narrative cites."""
+    return {s: [{k: r.get(k) for k in EVIDENCE_FIELDS} for r, _ in items]
+            for s, items in windowed(records, cfg).items()}
+
+
+def _discovered_at(answers, cid):
+    """Ladder step at which the developer last worked a finding out, or None."""
+    rung = None
+    for a in sorted(answers, key=lambda a: a.get("timestamp", "")):
+        if (a.get("kind") == "answer" and a.get("question_kind") == "finding"
+                and a.get("concept_id") == cid and a.get("outcome") != "skipped"
+                and not a.get("revealed")):
+            rung = a.get("ladder_rung_reached") or 1
+    return rung
 
 
 # ------------------------------------------------------------------ CLI helper
@@ -221,12 +249,14 @@ def cert_levels(repo, save=False, today=None) -> dict:
         ladder = bank_f.get(cid, {}).get("ladder")
         findings.append({"concept_id": cid, "status": st.get("status", "open"),
                          "rung": st.get("rung", 1),
-                         "ladder_length": len(ladder) if isinstance(ladder, list) else None})
+                         "ladder_length": len(ladder) if isinstance(ladder, list) else None,
+                         "discovered_at": _discovered_at(prog["answers"], cid)})
     open_critical = sum(
         1 for cid, f in bank_f.items()
         if f.get("severity") == "critical"
         and prog["findings"].get(cid, {}).get("status", "open") in ("open", "in_progress"))
     out = {"skills": skill_levels(prog["answers"], cfg),
+           "evidence": skill_evidence(prog["answers"], cfg),
            "previous": _previous(repo / paths.STATE_DIRNAME / "certificates", today),
            "scopes": {"project": any(a.get("scope") == "project" for a in scored),
                       "diff_ranges": sorted({a["range_id"] for a in scored

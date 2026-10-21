@@ -104,11 +104,8 @@ def _load_bank_shaped(path, allow_topic_map=False):
     return data
 
 
-def cmd_bank_validate(args):
+def _validation_problems(repo, data):
     from enguru_lib import bank, paths
-    repo = _repo_root(os.getcwd())
-    path = _bank_path(repo, args.path)
-    data = _load_bank_json(path)
     digest = {"events": []}
     dp = repo / ".enguru" / "digest.json"
     if dp.exists():
@@ -116,8 +113,38 @@ def cmd_bank_validate(args):
             digest = paths.read_json(dp)
         except (paths.StateCorrupt, OSError, ValueError):
             digest = {"events": []}
-    problems = bank.validate_bank(repo, data, digest)
+    return bank.validate_bank(repo, data, digest)
+
+
+def cmd_bank_validate(args):
+    repo = _repo_root(os.getcwd())
+    path = _bank_path(repo, args.path)
+    data = _load_bank_json(path)
+    problems = _validation_problems(repo, data)
     emit({"ok": not problems, "problems": problems})
+
+
+def _inside_state(repo, path, what):
+    state = (repo / ".enguru").resolve()
+    if state not in Path(path).resolve().parents:
+        fail("state_corrupt", "%s must be inside .enguru/: %s" % (what, path))
+
+
+def cmd_bank_promote(args):
+    """Move a validated, sealed build from its work path to the live bank path."""
+    repo = _repo_root(os.getcwd())
+    work, dest = _bank_path(repo, args.work_path), _bank_path(repo, args.bank_path)
+    _inside_state(repo, work, "work_path")
+    _inside_state(repo, dest, "bank_path")
+    data = _load_bank_shaped(work, allow_topic_map=True)
+    problems = _validation_problems(repo, data)
+    if problems:
+        fail("state_corrupt", "%s still has %d validation problem(s); not promoted: %s"
+             % (args.work_path, len(problems),
+                "; ".join("%s: %s" % (p["item_id"], p["reason"]) for p in problems[:5])))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(str(work), str(dest))
+    emit({"ok": True, "bank_path": args.bank_path})
 
 
 def cmd_bank_seal(args):
@@ -157,9 +184,7 @@ def cmd_bank_finding(args):
     if f is None:
         fail("state_corrupt", "no finding for concept %s in %s" % (args.concept_id, path))
     out = _bank_path(repo, args.out)
-    state = (repo / ".enguru").resolve()
-    if state not in out.resolve().parents:
-        fail("state_corrupt", "--out must be inside .enguru/: %s" % args.out)
+    _inside_state(repo, out, "--out")
     out.parent.mkdir(parents=True, exist_ok=True)
     paths.atomic_write_json(out, f)
     emit({"ok": True, "out": args.out})
@@ -274,6 +299,10 @@ def build_parser():
     av = bk.add_parser("apply-verdicts", help="apply finding-verifier verdicts")
     av.add_argument("path")
     av.set_defaults(func=cmd_bank_apply_verdicts)
+    pr = bk.add_parser("promote", help="move a validated build from its work path to the bank path")
+    pr.add_argument("work_path")
+    pr.add_argument("bank_path")
+    pr.set_defaults(func=cmd_bank_promote)
     bf = bk.add_parser("finding", help="write one finding's JSON to a file")
     bf.add_argument("path")
     bf.add_argument("concept_id")

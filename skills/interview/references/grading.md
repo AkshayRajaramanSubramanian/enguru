@@ -49,7 +49,7 @@ Insistence never changes a grade. Repeating, rephrasing or pressure is not evide
 
 ## 6. Limits
 
-- **Follow-ups:** at most 3 per question, counting partial follow-ups and check questions. After the third, give the full explanation and record with `followups_used: 3` (the CLI queues the concept for revisit).
+- **Follow-ups:** at most 3 per **concept** in a session, counting partial follow-ups and check questions across all of that concept's questions (thorough diff mode can ask two). Record `followups_used` as the concept's running total this session, including follow-ups on its earlier question. When it reaches 3, give the full explanation, ask no more about that concept, and record with `followups_used: 3` (the CLI queues the concept for revisit).
 - **Hints:** two steps, on request (`hint`). Step 1 names the file; step 2 names the region (function or line range), both taken from the must-have `evidence_ref`s. Never a third hint; offer "I don't know" instead.
 
 ## 7. Each style

@@ -45,7 +45,7 @@ Scope flags (reuse them for `digest prep`):
 Add `--quick` or `--thorough` to `session start` only if the developer gave it (diff mode only). Run `enguru session start <scope flags> [--quick|--thorough]` and keep `session_id`, `scope`, `range_id`, `intensity` from its output for every record.
 
 - `lock_held`: show the message (it says when the other session started and its last heartbeat) and ask whether to take it over. If yes, re-run with `--takeover`; if no, stop.
-- `no_base`: no default branch was found. Ask the developer for a range `A..B` and re-run with `--diff --range A..B`.
+- `no_base`: no default branch was found. Ask the developer for a range `A..B`, change the scope flags to `--diff --range A..B` for this and **every later call** (including `digest prep`), and re-run.
 - `empty_diff`: say there is nothing to quiz on in this range, suggest `/enguru:interview` (project mode), and stop.
 - `not_git`: diff mode needs git; suggest project mode and stop.
 - `state_corrupt`: relay the message and stop.
@@ -68,27 +68,28 @@ Call `enguru next` and handle its `action`. Repeat until `done` or `stop`.
 
 ### `build_topic_map`, `build_module`, `build_diff_bank`
 
-Dispatch one `enguru:project-analyst`. Prompt fields:
+The action gives a work file `out_path` (where the analyst writes) and the live `bank_path` (where the bank goes once it passes). Dispatch one `enguru:project-analyst`. Prompt fields:
 - `build_topic_map`: `mode: topic_map`, `digest_path`, `out_path`, `keylog_path`.
 - `build_module`: `mode: module`, `module_id`, `topic_map_path: .enguru/banks/project/topic-map.json`, `digest_path`, `out_path`, `keylog_path`.
 - `build_diff_bank`: `mode: diff_bank`, `range_id`, `digest_path`, `out_path`, `keylog_path`.
 
-Tell the developer in one line that you are reading their code (this can take a few minutes). Then **validate** (below) the `out_path` and call `next`.
+Tell the developer in one line that you are reading their code (this can take a few minutes). Then **validate** (below) the `out_path`. If it passes: `enguru bank seal <out_path>` (a full seal), then `enguru bank promote <out_path> <bank_path>`, which re-validates and moves the file into place (exit 2 if problems remain: treat as give-up). Call `next`.
+
+**Give up** (the build still fails after the steps below): `rm -f <out_path>`, tell the developer this part of the project could not be built this time and to try again later, then go to step 6 (end). Never promote, seal or hand-edit a failing build.
 
 ### `rebuild_concept`
 
-The concept's code changed (`reason: stale`) or its questions are used up (`reason: revisit`). Dispatch `enguru:project-analyst` with `mode: revisit`, `concept_id`, `bank_path`, `asked_question_ids`, `topic_map_path: .enguru/banks/project/topic-map.json`, `digest_path`, `out_path`, `keylog_path`. The analyst writes a partial bank to `out_path`. Validate the partial (below, but without the final seal), then `enguru bank merge <bank_path> <out_path>`, then `enguru bank seal <bank_path> --ids <concept_id>` (required, or the rebuilt concept can never be detected as stale; `--ids` leaves the other concepts' staleness alone). If the partial is still unusable after the retry, skip the merge and just call `next`; the CLI will not ask for that rebuild again this session.
+The concept's code changed (`reason: stale`) or its questions are used up (`reason: revisit`). Dispatch `enguru:project-analyst` with `mode: revisit`, `concept_id`, `bank_path`, `asked_question_ids`, `topic_map_path: .enguru/banks/project/topic-map.json`, `digest_path`, `out_path`, `keylog_path`. The analyst writes a partial bank to the work file `out_path`. Validate it (below). If it passes: `enguru bank merge <bank_path> <out_path>`, then `enguru bank seal <bank_path> --ids <concept_id>` (required, or the rebuilt concept can never be detected as stale; `--ids` leaves the other concepts alone). On give-up, `rm -f <out_path>` and call `next`; the CLI will not ask for that rebuild again this session.
 
-### Validate (after every analyst run)
+### Validate (after every analyst run, on its `out_path`)
 
-1. `enguru bank validate <out_path>` returns `{ok, problems: [{item_id, reason}]}`. If the file is missing or not JSON, the call exits 2; treat that as a problem with the whole file.
+1. `enguru bank validate <out_path>` returns `{ok, problems: [{item_id, reason}]}`. If the file is missing or not JSON, the call exits 2; that is a whole-file problem.
 2. If there are problems, re-dispatch the analyst **once** with the same prompt plus: "Your previous output at out_path failed validation. Fix these items and rewrite the whole file:" followed by the problem list. Validate again.
 3. Still failing:
-   - Problems on specific ids (not `$`): `enguru bank drop <out_path> --ids id1,id2` (a topic map cannot be dropped from; treat it like the next case).
-   - Whole-file problems (`$`, missing file) or a failing topic map: tell the developer this part could not be built, then go to step 6 (end).
-4. `enguru bank seal <out_path>` (a full seal, for a freshly built bank or topic map; for a partial, seal the target bank with `--ids` after the merge instead).
+   - Only problems on specific ids (not `$`), in a bank (not a topic map): `enguru bank drop <out_path> --ids id1,id2`, then validate again; it must now pass.
+   - Whole-file problems (`$`, missing file, invalid JSON), a topic map with problems, or problems left after the drop: give up.
 
-Never show a question that has not passed validation; the CLI only serves sealed banks.
+The analyst only ever writes work files, so nothing reaches a live bank, and no question reaches the developer, without passing validation.
 
 ### `verify_findings`
 
@@ -98,11 +99,11 @@ New candidate findings need an independent check. For each of the action's `conc
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py" bank finding <bank_path> <concept_id> --out .enguru/work/findings/<concept_id>.json
 ```
 
-Then dispatch one `enguru:finding-verifier` per concept id, **all in one message**: `mode: verify`, `finding_json: .enguru/work/findings/<concept_id>.json`, `out_path: .enguru/work/verdicts/<concept_id>.json`. Then `enguru bank apply-verdicts <bank_path>` (confirmed findings go to guided discovery; refuted ones are dropped; uncertain or failed ones become ordinary quiz concepts). Do not tell the developer what was found. Call `next`.
+Clear any old verdicts first (`rm -f .enguru/work/verdicts/<concept_id>.json` for each id), so a verdict from an earlier run is never applied. Then dispatch one `enguru:finding-verifier` per concept id, **all in one message**: `mode: verify`, `finding_json: .enguru/work/findings/<concept_id>.json`, `out_path: .enguru/work/verdicts/<concept_id>.json`. Then `enguru bank apply-verdicts <bank_path>` (confirmed findings go to guided discovery; refuted ones are dropped; uncertain or failed ones become ordinary quiz concepts). Do not tell the developer what was found. Call `next`.
 
 ### `verify_fix`
 
-A confirmed finding's code changed. Dispatch `enguru:finding-verifier` with `mode: fix_check`, `finding_json:` the action's `finding` as inline JSON, `out_path:` the action's `out_path`. Read the verdict file (it is small and holds only `verdict` and `reason`). Record:
+A confirmed finding's code changed. First `rm -f <out_path>` (so an old verdict is never read), then dispatch `enguru:finding-verifier` with `mode: fix_check`, `finding_json:` the action's `finding` as inline JSON, `out_path:` the action's `out_path`. Read the verdict file (it is small and holds only `verdict` and `reason`). Record:
 
 ```
 {"kind": "fix_check", "session_id": "<session_id>", "concept_id": "<concept_id>",

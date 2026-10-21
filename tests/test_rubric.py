@@ -228,7 +228,14 @@ def test_cli_cert_levels(tmp_path):
     assert out["skills"]["comprehension"]["level"] == "developing"
     assert out["previous"] == {"comprehension": {"level": "novice"}}
     assert out["scopes"] == {"project": False, "diff_ranges": ["r0", "r1"]}
-    assert {"concept_id": "f1", "status": "in_progress", "rung": 2, "ladder_length": 3} in out["findings"]
+    assert {"concept_id": "f1", "status": "in_progress", "rung": 2, "ladder_length": 3,
+            "discovered_at": None} in out["findings"]
+    assert out["evidence"]["comprehension"][0] == {
+        "concept_id": "c0", "session_id": "s1", "scope": "diff", "range_id": "r0",
+        "question_kind": "quiz", "style": "explain_it", "difficulty": "foundational",
+        "outcome": "correct", "misconception_stated": False, "ladder_rung_reached": None,
+        "revealed": None}
+    assert out["evidence"]["systems_thinking"] == []
     assert out["revisit_count"] == 1
     assert out["open_critical"] == 1
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -255,3 +262,23 @@ def test_suggest_certificate_min_from_config():
     from enguru_lib import progress
     assert not hasattr(progress, "SUGGEST_CERTIFICATE_MIN")
     assert CFG["suggest_certificate_min"] == 6
+
+
+def test_cert_levels_evidence_is_the_windowed_records(tmp_path):
+    from enguru_lib import rubric
+    answers = [mk(i) for i in range(CFG["window"] + 3)] + [mk(99, outcome="skipped")]
+    fdone = mk(50, skill="review_judgment", cid="f1", question_kind="finding",
+               ladder_rung_reached=2, ladder_length=3, revealed=False)
+    answers.append(fdone)
+    prog = {"version": 1, "sessions": [], "answers": answers, "concepts": {}, "revisit": [],
+            "findings": {"f1": {"status": "fixed", "rung": 2}, "f2": {"status": "open", "rung": 1}},
+            "current": None}
+    _write(tmp_path / ".enguru" / "progress.json", prog)
+    out = rubric.cert_levels(tmp_path)
+    ev = out["evidence"]["comprehension"]
+    assert len(ev) == CFG["window"] == out["skills"]["comprehension"]["scored"]
+    assert [e["concept_id"] for e in ev] == ["c%d" % i for i in range(3, CFG["window"] + 3)]
+    assert [e["concept_id"] for e in out["evidence"]["defect_detection"]] == ["f1"]
+    by_id = {f["concept_id"]: f for f in out["findings"]}
+    assert by_id["f1"]["status"] == "fixed" and by_id["f1"]["discovered_at"] == 2
+    assert by_id["f2"]["discovered_at"] is None
