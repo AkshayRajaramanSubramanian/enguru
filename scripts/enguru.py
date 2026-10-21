@@ -210,6 +210,11 @@ def cmd_keylog_add(args):
     emit({"ok": True})
 
 
+def cmd_cert_levels(args):
+    from enguru_lib import rubric
+    emit(_progress_call(rubric.cert_levels, _repo_root(os.getcwd()), args.save))
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="enguru")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -264,6 +269,10 @@ def build_parser():
     sub.add_parser("status", help="progress summary").set_defaults(func=cmd_status)
     kl = sub.add_parser("keylog", help="answer-key corrections").add_subparsers(dest="kcmd", required=True)
     kl.add_parser("add", help="append a correction (JSON on stdin)").set_defaults(func=cmd_keylog_add)
+    ce = sub.add_parser("cert", help="certificate data").add_subparsers(dest="ccmd", required=True)
+    cl = ce.add_parser("levels", help="compute skill levels")
+    cl.add_argument("--save", action="store_true")
+    cl.set_defaults(func=cmd_cert_levels)
     return p
 
 

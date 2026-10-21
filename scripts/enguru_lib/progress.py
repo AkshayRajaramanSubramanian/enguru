@@ -5,14 +5,13 @@ import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import bank, gitinfo, paths, schema
+from . import bank, gitinfo, paths, rubric, schema
 
 QUICK_CONCEPTS = 5
 THOROUGH_CONCEPTS = 12
 THOROUGH_QUESTIONS = 2
 REVISIT_PER_SESSION = 2
 MAX_FOLLOWUPS = 3
-SUGGEST_CERTIFICATE_MIN = 6
 DIFFICULTIES = ["foundational", "intermediate", "advanced"]
 
 DIGEST_REL = ".enguru/digest.json"
@@ -343,7 +342,7 @@ def end_session(repo, now=None) -> dict:
         paths.release_lock(paths.state_dir(repo), current["session_id"])
     return {"solid": solid, "revisit": list(prog["revisit"]),
             "undisclosed_critical": undisclosed, "scored_since_last_certificate": scored,
-            "suggest_certificate": scored >= SUGGEST_CERTIFICATE_MIN}
+            "suggest_certificate": scored >= rubric.load_config()["suggest_certificate_min"]}
 
 
 # ----------------------------------------------------------------- next item
