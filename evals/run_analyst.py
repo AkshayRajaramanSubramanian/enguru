@@ -11,16 +11,21 @@ skill's build steps through `claude -p --plugin-dir <repo>`:
   ids still failing, as the skill does.
 
 Matching rule: a planted bug counts as found if any finding in a module bank (any
-verdict; all are "pending" here) has lines.file equal to the planted file (or one of
-its `also` locations) and [start, end] overlaps the planted line range widened by
-TOLERANCE lines on each side.
+verdict; all are "pending" here) both
+  - has lines.file equal to the planted file and [start, end] overlapping the planted
+    line range widened by TOLERANCE lines on each side, and
+  - has a `consequence` matching the bug's `match_terms` regex (case-insensitive),
+or does the same for one of the bug's `also` locations, each with its own match_terms.
 
 Prints {"planted_found", "planted_total", "recall", "invalid_items", "modules",
-"findings", "missed"}; invalid_items counts validation problems still present after the
+"findings", "missed", "matches", "finding_list"}: matches maps each planted id to the
+matching finding's location and the matched term; finding_list holds every finding's
+{file, start, end, consequence}; invalid_items counts validation problems still present after the
 re-dispatch (before any drop). Exits 1 if recall < 0.8 or the topic map never validates.
 """
 import argparse
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -85,6 +90,21 @@ def overlaps(finding, loc):
             and L["start"] <= b + TOLERANCE and L["end"] >= a - TOLERANCE)
 
 
+def match_finding(finding, planted):
+    """Return {"file", "lines", "term"} for the location of `planted` this finding hits
+    (overlap plus a match_terms hit in its consequence), or None."""
+    locs = [{"file": planted["file"], "lines": planted["lines"],
+             "match_terms": planted["match_terms"]}] + planted.get("also", [])
+    text = str(finding.get("consequence", ""))
+    for loc in locs:
+        if not overlaps(finding, loc):
+            continue
+        m = re.search(loc["match_terms"], text, re.IGNORECASE)
+        if m:
+            return {"file": loc["file"], "lines": loc["lines"], "term": m.group(0)}
+    return None
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--keep", help="build the repo here and keep it (for debugging)")
@@ -141,17 +161,29 @@ def main(argv=None):
             L = f["lines"]
             print("FINDING %s %s:%s-%s %s" % (mid, L["file"], L["start"], L["end"],
                                              f["consequence"][:160]), file=sys.stderr)
-    found, missed = 0, []
+    found, missed, matches = 0, [], {}
     for p in planted:
-        locs = [{"file": p["file"], "lines": p["lines"]}] + p.get("also", [])
-        if any(overlaps(f, loc) for f in findings for loc in locs):
+        hit = None
+        for f in findings:
+            m = match_finding(f, p)
+            if m:
+                L = f["lines"]
+                hit = {"finding": "%s:%s-%s" % (L["file"], L["start"], L["end"]),
+                       "planted_location": "%s:%s-%s" % (m["file"], m["lines"][0], m["lines"][1]),
+                       "term": m["term"]}
+                break
+        if hit:
             found += 1
+            matches[p["id"]] = hit
         else:
             missed.append(p["id"])
     recall = round(found / len(planted), 3)
     result = {"planted_found": found, "planted_total": len(planted), "recall": recall,
               "invalid_items": invalid, "modules": len(modules), "findings": len(findings),
-              "missed": missed}
+              "missed": missed, "matches": matches,
+              "finding_list": [{"file": f["lines"]["file"], "start": f["lines"]["start"],
+                                "end": f["lines"]["end"], "consequence": f["consequence"]}
+                               for f in findings]}
     if tmp:
         tmp.cleanup()
     return common.emit("analyst", result, recall >= TARGET_RECALL)

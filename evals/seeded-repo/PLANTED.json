@@ -1,18 +1,72 @@
 [
-  {"id": "idor", "category": "IDOR", "file": "src/routes/orders.js", "lines": [29, 38],
-   "anchor": "WHERE o.id = $1",
-   "description": "GET /orders/:id loads any order by id with no user_id filter or ownership check, so any signed-in user can read another customer's order, items and shipping address."},
-  {"id": "missing-await", "category": "missing_await", "file": "src/routes/account.js", "lines": [31, 34],
-   "anchor": "db.query('UPDATE users SET password_hash",
-   "description": "POST /account/password does not await the password UPDATE. The handler deletes other sessions and returns ok:true before the write finishes; if the write fails, the user is told the password changed when it did not, and the rejection is unhandled."},
-  {"id": "sql-injection", "category": "injection", "file": "src/routes/products.js", "lines": [38, 43],
-   "anchor": "ILIKE '%\" + term + \"%'",
-   "description": "GET /products/search concatenates q and category into the SQL string, so either parameter can inject SQL."},
-  {"id": "swallowed-payment-error", "category": "swallowed_exception", "file": "src/services/payments.js", "lines": [21, 23],
-   "anchor": "console.warn('charge failed for order'",
-   "also": [{"file": "src/routes/checkout.js", "lines": [72, 79]}],
-   "description": "payments.charge catches every Stripe error (declined card, network failure) and resolves to undefined. Checkout only treats a defined payment with a non-succeeded status as failure, so a failed charge marks the order paid with no money taken."},
-  {"id": "coupon-race", "category": "race_condition", "file": "src/services/coupons.js", "lines": [11, 25],
-   "anchor": "UPDATE coupons SET times_used = $1",
-   "description": "coupons.redeem reads times_used, checks it against max_uses, then writes times_used + 1 as an absolute value. Concurrent checkouts (READ COMMITTED, no row lock) both pass the check and both write the same value, so a coupon is used beyond max_uses and redemptions are lost from the count."}
+ {
+  "id": "idor",
+  "category": "IDOR",
+  "file": "src/routes/orders.js",
+  "lines": [
+   29,
+   38
+  ],
+  "anchor": "WHERE o.id = $1",
+  "description": "GET /orders/:id loads any order by id with no user_id filter or ownership check, so any signed-in user can read another customer's order, items and shipping address.",
+  "match_terms": "user_id|owner|any (signed-in|logged-in|authenticated) (user|customer)|(another|other) (user|customer)"
+ },
+ {
+  "id": "missing-await",
+  "category": "missing_await",
+  "file": "src/routes/account.js",
+  "lines": [
+   31,
+   34
+  ],
+  "anchor": "db.query('UPDATE users SET password_hash",
+  "description": "POST /account/password does not await the password UPDATE. The handler deletes other sessions and returns ok:true before the write finishes; if the write fails, the user is told the password changed when it did not, and the rejection is unhandled.",
+  "match_terms": "await"
+ },
+ {
+  "id": "sql-injection",
+  "category": "injection",
+  "file": "src/routes/products.js",
+  "lines": [
+   38,
+   43
+  ],
+  "anchor": "ILIKE '%\" + term + \"%'",
+  "description": "GET /products/search concatenates q and category into the SQL string, so either parameter can inject SQL.",
+  "match_terms": "inject|concatenat"
+ },
+ {
+  "id": "swallowed-payment-error",
+  "category": "swallowed_exception",
+  "file": "src/services/payments.js",
+  "lines": [
+   21,
+   23
+  ],
+  "anchor": "console.warn('charge failed for order'",
+  "also": [
+   {
+    "file": "src/routes/checkout.js",
+    "lines": [
+     72,
+     79
+    ],
+    "match_terms": "undefined|swallow"
+   }
+  ],
+  "description": "payments.charge catches every Stripe error (declined card, network failure) and resolves to undefined. Checkout only treats a defined payment with a non-succeeded status as failure, so a failed charge marks the order paid with no money taken.",
+  "match_terms": "undefined|swallow|catch"
+ },
+ {
+  "id": "coupon-race",
+  "category": "race_condition",
+  "file": "src/services/coupons.js",
+  "lines": [
+   11,
+   25
+  ],
+  "anchor": "UPDATE coupons SET times_used = $1",
+  "description": "coupons.redeem reads times_used, checks it against max_uses, then writes times_used + 1 as an absolute value. Concurrent checkouts (READ COMMITTED, no row lock) both pass the check and both write the same value, so a coupon is used beyond max_uses and redemptions are lost from the count.",
+  "match_terms": "race|concurren|simultaneous"
+ }
 ]

@@ -4,13 +4,18 @@
   history in evals/seeded-repo/COMMITS.json. PLANTED.json, COMMITS.json and history/ are
   never copied into it, so the agents under test cannot read the labels.
 - claude(...): one `claude -p` call with a timeout and one retry when `accept` rejects it.
+  `--plugin-dir` points at a temp copy of the plugin without evals/, e2e/, docs/, tests/
+  and VCS/state folders, so the models under test cannot read datasets or labels.
 - pmap(...): run work items concurrently.
 """
+import atexit
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -25,6 +30,25 @@ _GIT_ENV = {
     "GIT_AUTHOR_NAME": "Dana Lee", "GIT_AUTHOR_EMAIL": "dana@example.com",
     "GIT_COMMITTER_NAME": "Dana Lee", "GIT_COMMITTER_EMAIL": "dana@example.com",
 }
+
+
+PLUGIN_EXCLUDE = {"evals", "e2e", "docs", "tests", ".git", ".superpowers", ".enguru",
+                  "__pycache__", ".pytest_cache"}
+_plugin = {"dir": None}
+_plugin_lock = threading.Lock()
+
+
+def plugin_dir():
+    """A temp copy of the plugin (created once per process) without PLUGIN_EXCLUDE."""
+    with _plugin_lock:
+        if _plugin["dir"] is None:
+            tmp = tempfile.mkdtemp(prefix="enguru-plugin-")
+            atexit.register(shutil.rmtree, tmp, True)
+            dest = Path(tmp) / "enguru"
+            shutil.copytree(ROOT, dest, ignore=lambda d, names: [
+                n for n in names if n in PLUGIN_EXCLUDE or n.endswith(".pyc")])
+            _plugin["dir"] = dest
+        return _plugin["dir"]
 
 
 def git(repo, *args, env=None):
@@ -77,7 +101,7 @@ def claude(prompt, cwd, tools, timeout, accept=None, extra=(), model=MODEL):
     """Run `claude -p` once, retrying once on timeout, non-zero exit or accept() -> False.
 
     accept(stdout) returns a truthy value to keep the run. Returns (stdout, ok)."""
-    cmd = ["claude", "-p", "--plugin-dir", str(ROOT), "--allowedTools", tools,
+    cmd = ["claude", "-p", "--plugin-dir", str(plugin_dir()), "--allowedTools", tools,
            "--model", model, *extra, prompt]
     out = ""
     for _attempt in range(2):

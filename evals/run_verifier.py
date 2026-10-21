@@ -7,7 +7,10 @@ Builds the seeded repo, writes each finding to .enguru/work/findings/<concept_id
 (as `bank finding` would) and runs the enguru:finding-verifier agent in verify mode
 through `claude -p --plugin-dir <repo>`, one call per finding, in parallel:
   - evals/planted-findings.json: the 5 planted bugs, stated correctly (true);
-  - evals/false-findings.json: 5 plausible but wrong findings (the code prevents each).
+  - evals/false-findings.json: 7 plausible but wrong findings (the code prevents each).
+    Two are half-true: the smell is real (an unchecked header slice, a field that looks
+    unloaded) but code in another file makes the consequence impossible (requireAuth
+    rejects a missing header; findBySessionToken selects stripe_customer_id).
 A verdict must be schema-valid with the right concept_id and mode; a missing or invalid
 verdict counts as a harness failure.
 

@@ -128,5 +128,57 @@
    }
   ],
   "verdict": "pending"
+ },
+ {
+  "concept_id": "account-token-1",
+  "severity": "major",
+  "lines": {
+   "file": "src/routes/account.js",
+   "start": 29,
+   "end": 36
+  },
+  "consequence": "POST /account/password calls req.get('authorization').slice(7) with no null check, so a request without an Authorization header crashes the handler with a TypeError before the password is changed, returning 500 instead of 401.",
+  "fix": "Check the header before slicing it.",
+  "ladder": [
+   {
+    "question": "Where does the handler get the current token?",
+    "expected_realization": "From the Authorization header."
+   },
+   {
+    "question": "What if that header is missing?",
+    "expected_realization": "get() returns undefined."
+   },
+   {
+    "question": "What does undefined.slice(7) do on line 30?",
+    "expected_realization": "It throws a TypeError."
+   }
+  ],
+  "verdict": "pending"
+ },
+ {
+  "concept_id": "checkout-customer-1",
+  "severity": "critical",
+  "lines": {
+   "file": "src/routes/checkout.js",
+   "start": 66,
+   "end": 71
+  },
+  "consequence": "Checkout passes req.user.stripe_customer_id to payments.charge, but req.user is loaded from the session and has no stripe_customer_id field, so every charge is created with customer undefined and fails for every order.",
+  "fix": "Load the user's Stripe customer id before charging.",
+  "ladder": [
+   {
+    "question": "Which customer does checkout charge?",
+    "expected_realization": "req.user.stripe_customer_id."
+   },
+   {
+    "question": "Where does req.user come from?",
+    "expected_realization": "The auth middleware."
+   },
+   {
+    "question": "Which columns does it load?",
+    "expected_realization": "Not stripe_customer_id, so it is undefined."
+   }
+  ],
+  "verdict": "pending"
  }
 ]
