@@ -1,0 +1,18 @@
+[
+  {"message": "Initial skeleton: Postgres pool, session auth middleware",
+   "files": ["package.json", "README.md", "src/db.js", "src/services/users.js", "src/middleware/auth.js"]},
+  {"message": "Product listing and search endpoints",
+   "files": ["src/routes/products.js"]},
+  {"message": "Orders, checkout and Stripe payments",
+   "files": ["src/routes/orders.js", {"path": "src/routes/checkout.js", "from": "history/checkout.v1.js"},
+             "src/services/payments.js", "src/services/inventory.js"]},
+  {"message": "Invoice endpoint for the PDF renderer; wire up routes",
+   "files": [{"path": "src/routes/invoices.js", "from": "history/invoices.v1.js"},
+             {"path": "src/app.js", "from": "history/app.v1.js"}]},
+  {"message": "Coupons at checkout",
+   "files": ["src/services/coupons.js", "src/routes/checkout.js"]},
+  {"message": "fix: invoices are only visible to the order's owner",
+   "files": ["src/routes/invoices.js"]},
+  {"message": "Password change and support refunds",
+   "files": ["src/routes/account.js", "src/routes/refunds.js", "src/app.js"]}
+]

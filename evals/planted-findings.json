@@ -1,0 +1,132 @@
+[
+ {
+  "concept_id": "orders-idor-1",
+  "severity": "critical",
+  "lines": {
+   "file": "src/routes/orders.js",
+   "start": 27,
+   "end": 43
+  },
+  "consequence": "Any signed-in user can fetch GET /orders/<any id> and read another customer's order, items and shipping address, because the query filters only on o.id.",
+  "fix": "Add AND o.user_id = $2 with req.user.id to the query (404 when no row).",
+  "ladder": [
+   {
+    "question": "Who is allowed to see a given order?",
+    "expected_realization": "Only the customer who placed it."
+   },
+   {
+    "question": "Where does GET /orders/:id enforce that?",
+    "expected_realization": "It should compare the order's owner with req.user."
+   },
+   {
+    "question": "Look at the WHERE clause on line 32. Which columns does it filter on?",
+    "expected_realization": "Only o.id, so any id returns any customer's order."
+   }
+  ],
+  "verdict": "pending"
+ },
+ {
+  "concept_id": "account-password-1",
+  "severity": "major",
+  "lines": {
+   "file": "src/routes/account.js",
+   "start": 29,
+   "end": 36
+  },
+  "consequence": "The password UPDATE is not awaited: the handler signs out other sessions and returns ok:true before the write completes, so a failed write tells the user the password changed when it did not, and the rejection is unhandled.",
+  "fix": "await the db.query UPDATE before deleting sessions and responding.",
+  "ladder": [
+   {
+    "question": "What has to be true before the API tells the user their password changed?",
+    "expected_realization": "The new hash is stored."
+   },
+   {
+    "question": "Which statements in the handler are awaited?",
+    "expected_realization": "The DELETE is awaited; the UPDATE on line 31 is not."
+   },
+   {
+    "question": "What happens if the UPDATE on line 31 rejects?",
+    "expected_realization": "Nobody catches it; ok:true was already sent."
+   }
+  ],
+  "verdict": "pending"
+ },
+ {
+  "concept_id": "products-search-1",
+  "severity": "critical",
+  "lines": {
+   "file": "src/routes/products.js",
+   "start": 33,
+   "end": 47
+  },
+  "consequence": "GET /products/search builds SQL by concatenating the q and category query parameters, so a request can inject arbitrary SQL (read users, sessions, or alter data).",
+  "fix": "Use parameters: name ILIKE $1 with '%' + term + '%', and category = $2.",
+  "ladder": [
+   {
+    "question": "Where does user input enter the search query?",
+    "expected_realization": "q and category."
+   },
+   {
+    "question": "How does that input get into the SQL text?",
+    "expected_realization": "By string concatenation, not parameters."
+   },
+   {
+    "question": "What does q=' OR 1=1 -- do on line 38?",
+    "expected_realization": "It escapes the string literal and changes the query."
+   }
+  ],
+  "verdict": "pending"
+ },
+ {
+  "concept_id": "payments-charge-1",
+  "severity": "critical",
+  "lines": {
+   "file": "src/services/payments.js",
+   "start": 7,
+   "end": 24
+  },
+  "consequence": "charge() catches every Stripe error and resolves to undefined; checkout (src/routes/checkout.js lines 72-79) only treats a defined payment with a non-succeeded status as a failure, so a declined or failed charge marks the order paid with no money collected.",
+  "fix": "Rethrow (or return a failed status) from charge(), and in checkout treat a missing payment as failure.",
+  "ladder": [
+   {
+    "question": "What does checkout do after calling payments.charge?",
+    "expected_realization": "It checks the result before marking the order paid."
+   },
+   {
+    "question": "What does charge() return when Stripe throws, e.g. a declined card?",
+    "expected_realization": "The catch block logs and returns nothing: undefined."
+   },
+   {
+    "question": "With payment undefined, which branch runs at checkout.js line 72?",
+    "expected_realization": "The failure branch is skipped and the order is marked paid."
+   }
+  ],
+  "verdict": "pending"
+ },
+ {
+  "concept_id": "coupons-redeem-1",
+  "severity": "major",
+  "lines": {
+   "file": "src/services/coupons.js",
+   "start": 10,
+   "end": 27
+  },
+  "consequence": "redeem() reads times_used, checks it against max_uses, then writes times_used + 1 as a fixed value without a row lock; two concurrent checkouts both pass the check and both write the same value, so a limited coupon is used more than max_uses times.",
+  "fix": "Use an atomic UPDATE coupons SET times_used = times_used + 1 WHERE id = $1 AND times_used < max_uses RETURNING ..., or SELECT ... FOR UPDATE.",
+  "ladder": [
+   {
+    "question": "What stops a coupon being used more than max_uses times?",
+    "expected_realization": "The check on line 19."
+   },
+   {
+    "question": "What happens when two checkouts redeem the same coupon at the same moment?",
+    "expected_realization": "Both read the same times_used."
+   },
+   {
+    "question": "What value does each write on line 22?",
+    "expected_realization": "The same times_used + 1, so both pass and the count is lost."
+   }
+  ],
+  "verdict": "pending"
+ }
+]
