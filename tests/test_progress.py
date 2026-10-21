@@ -303,6 +303,7 @@ def test_revealed_finding_goes_to_revisit_queue_not_back_to_its_slot(tmp_path):
     assert asked == ["q-c1-1", "q-c2-1"]  # session 1 asked the foundational q-*-2
     assert item["action"] == "ladder" and item["concept_id"] == "f1"
     assert item["rung"] == 1 and item["announce"] is False and item["revisit"] is True
+    assert progress.next_item(repo) == item  # repeats until recorded, like any ladder
     sid2 = load_progress(repo)["current"]["session_id"]
     progress.record(repo, rec(sid2, "f1", None, "incorrect", kind="ladder_progress",
                               qkind="finding", ladder_rung_reached=2, ladder_length=3))

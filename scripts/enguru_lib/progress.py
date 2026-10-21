@@ -553,9 +553,10 @@ def _revisit_ladder(repo, prog, idx, cid):
     if f is None:
         return None
     cur = prog["current"]
-    cur["served_concepts"].append(cid)
-    cur["revisit_served"].append(cid)
-    _save(repo, prog)
+    if cid not in cur["revisit_served"]:
+        cur["served_concepts"].append(cid)
+        cur["revisit_served"].append(cid)
+        _save(repo, prog)
     return {"action": "ladder", "concept_id": cid, "rung": 1, "step": f["ladder"][0],
             "ladder_length": len(f["ladder"]), "severity": f["severity"], "announce": False,
             "revisit": True, "finding": f}
@@ -659,7 +660,8 @@ def _findings_phase(repo, prog, session, idx):
             _save(repo, prog)
         return ladder
     for cid in cur["revisit_ladders"]:
-        if cid not in cur["revisit_served"] and _concept_status(prog, cid) != "retired":
+        if (_concept_status(prog, cid) != "retired"
+                and not _finding_answered_in(prog, cid, session["id"])):
             item = _revisit_ladder(repo, prog, idx, cid)
             if item:
                 return item
