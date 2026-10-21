@@ -117,6 +117,7 @@ def test_invalid_cache_deleted_and_flagged(tmp_path):
     _prep(r, root)
     res = digest.merge(r)
     assert res["fallback_chunks"] == ["s1__0"] and not cache[0].exists()
+    assert _digest(r)["meta"]["fallback_chunks"] == ["s1__0"]  # noted in digest.meta
 
 
 def _big(n, para_len=400):

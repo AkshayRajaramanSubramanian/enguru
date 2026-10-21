@@ -201,6 +201,8 @@ def prep(repo, scope, root):
             candidates = blast.blast_radius(repo, blast.changed_symbols(hunks), changed_paths)
         except RuntimeError as e:
             raise DigestError("no_base", str(e))
+        for h in hunks:
+            h.lines = [redact(line) for line in h.lines]
         diff = {"hunks": [asdict(h) for h in hunks], "excluded": excluded,
                 "blast_radius_candidates": candidates}
         dates = [d for d in (_parse_ts(c.date) for c in commits) if d]
@@ -220,6 +222,8 @@ def prep(repo, scope, root):
     sessions, skipped = transcripts.load_sessions(repo, root)
     relevant = []
     for s in sessions:
+        if transcripts.is_enguru_session(s):
+            continue
         if changed_paths is not None:
             overlap = any(transcripts.edited_files(t, repo) & changed_paths for t in s.turns)
             in_window = window is not None and any(

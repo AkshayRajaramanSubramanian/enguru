@@ -143,6 +143,23 @@ def load_sessions(repo: Path, root: Path = DEFAULT_ROOT) -> Tuple[List[Session],
     return sessions, skipped
 
 
+_ENGURU_CLI = re.compile(
+    r"enguru\.py[\"']?\s+(?:check|digest|bank|session|next|record|status|keylog|cert)\b")
+_ENGURU_SKILL = re.compile(r"<command-name>/?enguru:(?:interview|certificate)\b")
+
+
+def is_enguru_session(session: Session) -> bool:
+    """True for the developer's own enguru interview/certificate sessions, which are
+    not coding history and must not feed the digest."""
+    for t in session.turns:
+        if t.role == "user" and _ENGURU_SKILL.search(t.text):
+            return True
+        for tu in t.tool_uses:
+            if tu.name == "Bash" and _ENGURU_CLI.search(str(tu.input.get("command", ""))):
+                return True
+    return False
+
+
 def edited_files(turn: Turn, repo: Path) -> Set[str]:
     repo_real = os.path.realpath(str(repo))
     out = set()

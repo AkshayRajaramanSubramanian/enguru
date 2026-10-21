@@ -217,3 +217,32 @@ def test_extractor_fan_out_capped_to_recent_sessions_and_chunks(tmp_path, monkey
 def test_default_fan_out_limits_in_config():
     lim = digest.load_limits()
     assert lim == {"max_sessions": 12, "max_chunks": 12}
+
+
+def test_enguru_interview_sessions_excluded(tmp_path):
+    r = make_repo(tmp_path, [{"a.py": "x = 1\n"}], ["init"])
+    root = tmp_path / "tx"
+    enc = transcripts.encode_project_dir(r)
+    c = str(r)
+    write_transcript(root, enc, "work", [user("please add a feature", cwd=c, session_id="work")])
+    write_transcript(root, enc, "quiz", [
+        user("<command-name>/enguru:interview</command-name>", cwd=c, session_id="quiz"),
+        assistant([_tu("Bash", command='python3 "/p/scripts/enguru.py" next')], cwd=c,
+                  session_id="quiz")])
+    write_transcript(root, enc, "quiz2", [
+        user("go", cwd=c, session_id="quiz2"),
+        assistant([_tu("Bash", command='python3 "/x/enguru/scripts/enguru.py" session start --project')],
+                  cwd=c, session_id="quiz2")])
+    out = _prep(r, root)
+    assert [p["chunk_id"] for p in out["pending"]] == ["work__0"]
+    rules = _rules(r)
+    assert rules["sessions_found"] == 3 and rules["sessions_used"] == 1
+
+
+def test_diff_hunk_lines_redacted(tmp_path):
+    r = make_repo(tmp_path, [{"a.py": "x = 1\n"}, {"a.py": "x = 1\napi_key = 'abcdefghijklmnop'\n"}],
+                  ["c1", "c2"])
+    digest.prep(r, digest.resolve_scope(r, False, "HEAD~1..HEAD", False), tmp_path / "tx")
+    lines = _rules(r)["diff"]["hunks"][0]["lines"]
+    assert "abcdefghijklmnop" not in json.dumps(lines)
+    assert any("[REDACTED]" in l for l in lines)
