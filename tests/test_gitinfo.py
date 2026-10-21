@@ -127,3 +127,16 @@ def test_file_map_without_git(tmp_path):
     m = gitinfo.file_map(d)
     assert [f["path"] for f in m["files"]] == ["app.py"]
     assert m["entry_points"] == ["app.py"]
+
+
+def test_excluded_hunk_body_cannot_forge_headers(tmp_path):
+    body = "\n".join("l%d" % i for i in range(30)) + "\n"
+    r = make_repo(tmp_path, [{".env": body, "src/a.py": "x\n"}], ["c1"])
+    changed = body.replace("l2\n", "-- x\n").replace("l25\n", "++ y\n")
+    (r / ".env").write_text(changed)
+    (r / "src" / "a.py").write_text("y\n")
+    git(r, "config", "diff.noprefix", "true")
+    hunks, excluded = gitinfo.diff_hunks(r, None, None, True)
+    assert excluded == [".env"]
+    assert {h.path for h in hunks} == {"src/a.py"}
+    assert not any("x" in l or "y" in l for h in hunks if h.path == ".env" for l in h.lines)

@@ -187,19 +187,26 @@ def diff_hunks(repo, base, head, uncommitted):
         if binary or _is_generated(path) or is_env_file(path):
             if path not in excluded:
                 excluded.append(path)
-    _, out = _git(repo, "diff", "-U3", "--no-color", "--no-ext-diff", "-M", *rng)
+    _, out = _git(repo, "diff", "-U3", "--no-color", "--no-ext-diff", "-M",
+                    "--src-prefix=a/", "--dst-prefix=b/", *rng)
     hunks = []
     old_path = new_path = None
     cur = None
+    in_hunk = False  # only "diff --git" ends a hunk body; "--- x" may be content
     for line in out.split("\n"):
         if line.startswith("diff --git "):
             cur = None
+            in_hunk = False
             old_path = new_path = None
-        elif cur is None and line.startswith("--- "):
+        elif in_hunk and not line.startswith("@@"):
+            if cur is not None and line[:1] in ("+", "-", " ", "\\"):
+                cur.lines.append(line)
+        elif line.startswith("--- "):
             old_path = None if line[4:].startswith("/dev/null") else _strip_prefix(line[4:])
-        elif cur is None and line.startswith("+++ "):
+        elif line.startswith("+++ "):
             new_path = None if line[4:].startswith("/dev/null") else _strip_prefix(line[4:])
         elif line.startswith("@@"):
+            in_hunk = True
             m = _HUNK_HDR.match(line)
             path = new_path or old_path
             if not m or path is None:
@@ -211,8 +218,6 @@ def diff_hunks(repo, base, head, uncommitted):
             cur = Hunk("h-%d" % (len(hunks) + 1), path,
                        int(m.group(1)), int(m.group(2)), [])
             hunks.append(cur)
-        elif cur is not None and line[:1] in ("+", "-", " ", "\\"):
-            cur.lines.append(line)
     return hunks, excluded
 
 
