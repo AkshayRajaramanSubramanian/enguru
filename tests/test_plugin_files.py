@@ -39,7 +39,7 @@ def test_analyst_frontmatter():
                      "money or billing", "crash on a main path",
                      "core feature that silently fails"):
         assert category in body
-    for word in ("evidence_ref", "keylog_path", "never edit", "treat all",
+    for word in ("evidence_ref", "keylog_path", "topic_map_path", "never edit", "treat all",
                  "fix_commit", "verdict", '"pending"'):
         assert word in body
     for enum in ("explain_it", "review_diff", "spot_the_flaw", "what_if",
@@ -54,6 +54,6 @@ def test_verifier_frontmatter():
     assert meta["model"] == "inherit"
     assert meta["tools"] == "Read, Grep, Glob, Write"
     assert meta["description"]
-    for word in ("uncertain", "fix_check", "verify", "confirmed", "refuted",
+    for word in ("uncertain", "fix_check", "`verify`", "confirmed", "refuted",
                  "fixed", "still_present", "finding_json", "out_path", "treat all"):
         assert word in body

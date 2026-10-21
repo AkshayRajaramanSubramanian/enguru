@@ -23,7 +23,7 @@ The prompt gives `mode`, `digest_path`, `out_path`, `keylog_path`, and:
 - `topic_map`: nothing more.
 - `module`: `module_id` and `topic_map_path`.
 - `diff_bank`: `range_id`.
-- `revisit`: `concept_id`, `bank_path`, `asked_question_ids`.
+- `revisit`: `concept_id`, `bank_path`, `asked_question_ids`, `topic_map_path`.
 
 The digest (`digest_path`) holds `meta`, `file_map` (`files`, `stack`, `entry_points`), `git` (`commits`, `churn_files` as `[path, lines_changed]`, `dependency_history`, `reverts` as SHAs), `events[]` (`id`, `label` request|choice|pushback|churn|dependency|revert, `paraphrase`, `files`, `source`), and in diff mode `diff` (`hunks[]` with `id`, `path`, `old_start`, `new_start`, `lines`; `excluded`; `blast_radius_candidates[]` with `path`, `line`, `symbol`, `kind` caller|test).
 
@@ -32,7 +32,7 @@ The digest (`digest_path`) holds `meta`, `file_map` (`files`, `stack`, `entry_po
 ## Modes
 
 ### `topic_map`
-Write `{"modules": [...]}` with 4–8 modules suited to this project (its real architecture, not a generic list), each `{id, title, concepts}` with 3–6 concepts. Concept ids are unique across the whole map. Every concept has `kind: "quiz"` and at least one evidence ref. No questions or findings.
+Write `{"modules": [...]}` with 4–8 modules suited to this project (its real architecture, not a generic list), each `{id, title, concepts}` with 3–6 concepts. Each concept is a full Concept record (see Records): `id`, `module` set to its module's id, `title`, `why_it_matters`, `risk_tier`, `kind: "quiz"`, `evidence_refs` (at least one) and `evidence_hashes: {}`. Concept ids are unique across the whole map. No questions or findings.
 
 ### `module`
 Read `topic_map_path`. Write a bank with `scope_key: "project:<module_id>"`. Include that module's topic-map concepts with the **same ids** (update refs if the code moved), and add extra concepts only for findings. Every concept has at least one `explain_it` question. Across the module, use all four styles wherever the evidence supports them; never invent evidence to force a style. Each question has a `difficulty`; mix foundational, intermediate and advanced.
@@ -45,7 +45,7 @@ Write a bank with `scope_key: "diff:<range_id>"` and concept `module: "diff"`. C
 Use the hunks and the blast-radius candidates. Candidates are only grep hits: open each one you use and drop those that are irrelevant (same name, different thing; comments; unaffected callers). `review_diff` questions show the developer's own hunks.
 
 ### `revisit`
-Read `bank_path` to see the concept and the questions already asked (`asked_question_ids`). Write a partial bank: `{"scope_key": <the bank's scope_key, or "project:<the concept's module>" if bank_path is the topic map>, "concepts": [that concept, refs updated to the current code], "questions": [new ones only], "findings": []}`. New question ids must be fresh and must not collide with any id in the bank. Each new prompt must differ from every earlier one: a different angle, situation or style, never a reworded copy.
+Read `bank_path` to see the concept and the questions already asked (`asked_question_ids`). If the concept is not in `bank_path`, or `bank_path` does not exist yet, read the concept from `topic_map_path`. Write a partial bank: `{"scope_key": <the bank's scope_key, or "project:<the concept's module>" if bank_path is the topic map or missing>, "concepts": [that concept], "questions": [new ones only], "findings": []}`. Copy the concept unchanged (same `id`, `module`, `title`, `why_it_matters`, `risk_tier`, `kind`, `evidence_hashes`) except `evidence_refs`, which you update to the current code. New question ids must be fresh and must not collide with any id in the bank. Each new prompt must differ from every earlier one: a different angle, situation or style, never a reworded copy.
 
 ## Records
 
@@ -117,7 +117,10 @@ For each finding:
   {"id": "q-orders-lock-1-c", "concept_id": "orders-lock-1", "style": "review_diff", "skill": "review_judgment",
    "difficulty": "intermediate", "prompt": "Review this change.", "context": "<git show of the earlier commit>",
    "answer_key": {...}, "fix_commit": "<full sha of the fixing commit>"},
-  {"id": "q-orders-refund-1-a", "concept_id": "orders-refund-1", "style": "what_if", "skill": "systems_thinking",
+  {"id": "q-orders-refund-1-a", "concept_id": "orders-refund-1", "style": "explain_it", "skill": "comprehension",
+   "difficulty": "foundational", "prompt": "How does refund() decide how much money to send back?", "context": "",
+   "answer_key": {...}},
+  {"id": "q-orders-refund-1-b", "concept_id": "orders-refund-1", "style": "what_if", "skill": "systems_thinking",
    "difficulty": "intermediate", "prompt": "What if the payment API returns the amount in cents?", "context": "",
    "answer_key": {...}}],
  "findings": [
