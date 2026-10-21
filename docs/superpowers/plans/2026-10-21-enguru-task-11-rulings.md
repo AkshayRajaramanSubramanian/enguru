@@ -28,8 +28,10 @@
 
 ## record
 - Validate against record schema → exit 2 `state_corrupt` with the error list on invalid input.
-- `answer` for question_kind quiz: append; correct/partial raises `phase_passed`; `correct` removes from revisit and → solid only on the deepest phase the concept has questions for; `skipped`, or `followups_used==3` and outcome≠correct → needs_revisit + append to revisit (no duplicates); otherwise status stays `open`.
-- `answer` for question_kind finding: append; if `revealed` → finding status `open`, rung reset to 1, concept into revisit; else → status `completed`. 
+- `answer` for question_kind quiz: append; correct/partial raises `phase_passed`; `correct` on the deepest phase the concept has questions for → solid and removed from revisit (correct below it changes no status and keeps a revisit concept queued); `skipped`, `followups_used==3` and outcome≠correct, or incorrect/dont_know on the deepest phase → needs_revisit + append to revisit (no duplicates); otherwise status stays `open`.
+- Module advancement (`_concept_done`) counts a concept that is needs_revisit or in the revisit queue as done, so a failed deep question never blocks the next module; it comes back through the capped warm-up revisits, which span modules. Status and certificates keep the strict solid rule.
+- `rebuild_concept` also carries `phase`: the lowest phase at or above the concept's floor (one above the deepest phase passed, capped at its deepest) that it has or had questions for, else that floor. If after a rebuild there is still nothing unasked at or above the floor, the newest unasked question below it is served instead of skipping the concept.
+- `answer` for question_kind finding: append; if `revealed` → finding status `revisit`, rung reset to 1, `explained` set, concept into revisit; else → status `completed`. 
 - `ladder_progress`: append (unscored), finding status `in_progress`, `rung = ladder_rung_reached`.
 - Returns `{"ok":true,"concept_status": <concept status or finding status for finding records>}`.
 

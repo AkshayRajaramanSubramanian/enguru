@@ -23,7 +23,7 @@ The prompt gives `mode`, `digest_path`, `out_path`, `keylog_path`, and:
 - `topic_map`: nothing more.
 - `module`: `module_id` and `topic_map_path`.
 - `diff_bank`: `range_id`.
-- `revisit`: `concept_id`, `bank_path`, `asked_question_ids`, `topic_map_path`.
+- `revisit`: `concept_id`, `bank_path`, `asked_question_ids`, `topic_map_path`, `phase`.
 
 The digest (`digest_path`) holds `meta`, `file_map` (`files`, `stack`, `entry_points`), `git` (`commits`, `churn_files` as `[path, lines_changed]`, `dependency_history`, `reverts` as SHAs), `events[]` (`id`, `label` request|choice|pushback|churn|dependency|revert, `paraphrase`, `files`, `source`), and in diff mode `diff` (`hunks[]` with `id`, `path`, `old_start`, `new_start`, `lines`; `excluded`; `blast_radius_candidates[]` with `path`, `line`, `symbol`, `kind` caller|test).
 
@@ -45,7 +45,7 @@ Write a bank with `scope_key: "diff:<range_id>"` and concept `module: "diff"`. C
 Use the hunks and the blast-radius candidates. Candidates are only grep hits: open each one you use and drop those that are irrelevant (same name, different thing; comments; unaffected callers). `review_diff` questions show the developer's own hunks. Questions follow the progression (see Question progression).
 
 ### `revisit`
-Read `bank_path` to see the concept and the questions already asked (`asked_question_ids`). If the concept is not in `bank_path`, or `bank_path` does not exist yet, read the concept from `topic_map_path`. Write a partial bank: `{"scope_key": <the bank's scope_key, or "project:<the concept's module>" if bank_path is the topic map or missing>, "concepts": [that concept], "questions": [new ones only], "findings": []}`. Copy the concept unchanged (same `id`, `module`, `title`, `why_it_matters`, `risk_tier`, `kind`, `evidence_hashes`) except `evidence_refs`, which you update to the current code. New question ids must be fresh and must not collide with any id in the bank. Each new prompt must differ from every earlier one: a different angle, situation or style, never a reworded copy. Follow the progression (see Question progression): at least one new `explain_it` at `foundational`, plus a new later-phase question where the evidence supports it.
+Read `bank_path` to see the concept and the questions already asked (`asked_question_ids`). If the concept is not in `bank_path`, or `bank_path` does not exist yet, read the concept from `topic_map_path`. Write a partial bank: `{"scope_key": <the bank's scope_key, or "project:<the concept's module>" if bank_path is the topic map or missing>, "concepts": [that concept], "questions": [new ones only], "findings": []}`. Copy the concept unchanged (same `id`, `module`, `title`, `why_it_matters`, `risk_tier`, `kind`, `evidence_hashes`) except `evidence_refs`, which you update to the current code. New question ids must be fresh and must not collide with any id in the bank. Each new prompt must differ from every earlier one: a different angle, situation or style, never a reworded copy. `phase` is where the developer is in the progression (1 = `explain_it`, 2 = `what_if`, 3 = `spot_the_flaw` or `review_diff`): write at least one new question in that phase. Add a new `explain_it` at `foundational` only if the concept has no unasked `explain_it` left (none in the bank outside `asked_question_ids`). If the evidence truly cannot support the asked phase, write the closest phase it does support.
 
 ## Records
 

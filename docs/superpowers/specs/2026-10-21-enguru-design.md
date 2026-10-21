@@ -246,7 +246,7 @@ The plugin doesn't fix anything. On a later run, if a finding's evidence hashes 
 2. Order of work (progressive: explain it → what if → spot the flaw → real findings):
    - housekeeping: building banks, verifying new findings, fix checks;
    - up to 2 items from the revisit queue, as warm-up (a finding explained by last resort keeps its slot but waits for the findings phase);
-   - **phase 1**, `explain_it`, across the session's concepts (project: the module's concepts in topic-map order; diff: the risk window), then **phase 2**, `what_if`, then **phase 3**, `spot_the_flaw` / `review_diff`. A concept enters phase p+1 only if its phase-p answer (this session or earlier) was correct or partial; a failed or skipped concept stops for this session. A concept with no question for a phase skips it.
+   - **phase 1**, `explain_it`, across the session's concepts (project: the module's concepts in topic-map order; diff: the risk window), then **phase 2**, `what_if`, then **phase 3**, `spot_the_flaw` / `review_diff`. A concept enters phase p+1 only if its phase-p answer (this session or earlier) was correct or partial; a failed or skipped concept stops for this session. A concept with no question for a phase, or no unasked one, skips it; a rebuild is requested only when nothing is left to ask in any remaining phase, and it names the phase to write for.
    - **real findings** last: a ladder stopped partway (in any scope) resumes at its saved rung, then open confirmed findings, critical first, then revisit ladders;
    - then done. A session that stops before the findings phase still discloses open or in-progress critical findings (§9.5).
 3. A short introduction: what's covered, the available commands, and that "I don't know" is better than guessing.
@@ -265,7 +265,8 @@ The interviewer only gets questions through `enguru.py next` and saves results t
 
 ### 9.4 Quiz flow
 - **Difficulty:** within a phase, the easiest unasked question first (foundational, then intermediate, then advanced); after a failure on the concept it stays at the lowest difficulty available.
-- **Solid:** a concept is solid when it has a correct answer on the deepest phase it has questions for (correct on explain-it alone is not enough when what-if or flaw questions exist). A module is finished when all its concepts are solid, retired, or (findings) completed or fixed.
+- **Solid:** a concept is solid when it has a correct answer on the deepest phase it has questions for (correct on explain-it alone is not enough when what-if or flaw questions exist). A module is finished when all its concepts are solid, retired, queued for revisit, or (findings) completed or fixed. An incorrect or "don't know" on a concept's deepest phase sends it to the revisit queue (like a skip), so a failed deep question never blocks the next module; the concept comes back through the warm-up revisits and becomes solid only with a correct answer on its deepest phase.
+- **Phases with nothing left:** within §9.1's phases, a phase with no unasked question is skipped, not rebuilt.
 - **Grading:** each must-have point is marked hit, partial or missed. A misconception the developer states outright counts against the answer more than an omission.
   - *Outcomes:* `correct | partial | incorrect | dont_know | skipped`
 - **Grading rules:**
