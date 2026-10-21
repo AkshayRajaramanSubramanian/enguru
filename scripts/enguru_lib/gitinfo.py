@@ -206,7 +206,8 @@ def _untracked_hunks(repo, start, excluded):
         full = os.path.join(str(repo), path)
         try:
             size = os.path.getsize(full)
-            data = b"" if size > UNTRACKED_MAX_BYTES else open(full, "rb").read()
+            with open(full, "rb") as fh:
+                data = b"" if size > UNTRACKED_MAX_BYTES else fh.read()
         except OSError:
             continue
         if _excluded_path(path) or size > UNTRACKED_MAX_BYTES or b"\0" in data[:8000]:
