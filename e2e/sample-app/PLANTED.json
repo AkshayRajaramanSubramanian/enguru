@@ -1,0 +1,24 @@
+[
+ {
+  "id": "act-as-header-impersonation",
+  "severity": "critical",
+  "file": "src/auth.js",
+  "lines": [
+   35,
+   37
+  ],
+  "anchor": "x-act-as-user",
+  "summary": "requireUser lets any logged-in caller set X-Act-As-User to another user's id and become that user (req.user.id), with no check that the caller is staff (there is no staff role at all). Every notes and tags route trusts req.user.id, so any user can read, overwrite, tag or delete anyone's notes: an authorization bypass on every data write."
+ },
+ {
+  "id": "notes-put-no-owner-check",
+  "severity": "critical",
+  "file": "src/routes/notes.js",
+  "lines": [
+   42,
+   50
+  ],
+  "anchor": "WHERE id = ?'",
+  "summary": "PUT /notes/:id updates any note by id without checking owner_id, so any logged-in user can overwrite another user's note (authorization bypass on a data write). GET and DELETE use loadOwnNote; PUT does not."
+ }
+]

@@ -1,0 +1,184 @@
+[
+ {
+  "concept_id": "invoices-idor-1",
+  "severity": "critical",
+  "lines": {
+   "file": "src/routes/invoices.js",
+   "start": 10,
+   "end": 24
+  },
+  "consequence": "GET /invoices/:id returns any invoice by id without checking that it belongs to the signed-in user, exposing other customers' invoices, emails and addresses.",
+  "fix": "Filter by the order's user_id.",
+  "ladder": [
+   {
+    "question": "Who should see an invoice?",
+    "expected_realization": "Its owner."
+   },
+   {
+    "question": "How does the route restrict that?",
+    "expected_realization": "It does not."
+   },
+   {
+    "question": "Look at the WHERE clause. What does it filter on?",
+    "expected_realization": "Only the invoice id."
+   }
+  ],
+  "verdict": "pending"
+ },
+ {
+  "concept_id": "products-sort-1",
+  "severity": "critical",
+  "lines": {
+   "file": "src/routes/products.js",
+   "start": 13,
+   "end": 25
+  },
+  "consequence": "GET /products interpolates the sort and dir query parameters directly into the ORDER BY clause with a template string, allowing SQL injection.",
+  "fix": "Whitelist the sort column and direction.",
+  "ladder": [
+   {
+    "question": "Where does req.query.sort go?",
+    "expected_realization": "Into the SQL text."
+   },
+   {
+    "question": "Is it parameterised?",
+    "expected_realization": "No, it is interpolated."
+   },
+   {
+    "question": "What does sort=name;DROP TABLE users do?",
+    "expected_realization": "It is injected into ORDER BY."
+   }
+  ],
+  "verdict": "pending"
+ },
+ {
+  "concept_id": "users-lastseen-1",
+  "severity": "major",
+  "lines": {
+   "file": "src/services/users.js",
+   "start": 14,
+   "end": 16
+  },
+  "consequence": "updateLastSeen() runs its UPDATE without await, so the write is fire-and-forget: errors become unhandled promise rejections and authentication continues before last_seen_at is stored.",
+  "fix": "Make it async and await the query.",
+  "ladder": [
+   {
+    "question": "Is the UPDATE awaited?",
+    "expected_realization": "No."
+   },
+   {
+    "question": "What happens on failure?",
+    "expected_realization": "Unhandled rejection."
+   },
+   {
+    "question": "What does the caller do while the UPDATE runs?",
+    "expected_realization": "It continues without waiting."
+   }
+  ],
+  "verdict": "pending"
+ },
+ {
+  "concept_id": "refunds-swallow-1",
+  "severity": "critical",
+  "lines": {
+   "file": "src/routes/refunds.js",
+   "start": 27,
+   "end": 37
+  },
+  "consequence": "When payments.refund throws, the error is caught and only logged, and the handler goes on to mark the order refunded, so support marks orders refunded although Stripe never returned the money.",
+  "fix": "Return an error response from the catch block instead of continuing.",
+  "ladder": [
+   {
+    "question": "What happens when Stripe rejects the refund?",
+    "expected_realization": "The catch logs it."
+   },
+   {
+    "question": "Then what?",
+    "expected_realization": "The order is still marked refunded."
+   },
+   {
+    "question": "Which line runs after the catch block?",
+    "expected_realization": "The UPDATE marking the order refunded."
+   }
+  ],
+  "verdict": "pending"
+ },
+ {
+  "concept_id": "inventory-race-1",
+  "severity": "major",
+  "lines": {
+   "file": "src/services/inventory.js",
+   "start": 11,
+   "end": 23
+  },
+  "consequence": "reserve() reads the current stock and writes back stock minus quantity in a separate step, so two concurrent checkouts can both see enough stock and oversell the product.",
+  "fix": "Use a single conditional UPDATE.",
+  "ladder": [
+   {
+    "question": "How does reserve check stock?",
+    "expected_realization": "It reads it first."
+   },
+   {
+    "question": "What if two run at once?",
+    "expected_realization": "Both see enough stock."
+   },
+   {
+    "question": "What does each concurrent reserve write?",
+    "expected_realization": "The same stale stock minus quantity."
+   }
+  ],
+  "verdict": "pending"
+ },
+ {
+  "concept_id": "account-token-1",
+  "severity": "major",
+  "lines": {
+   "file": "src/routes/account.js",
+   "start": 29,
+   "end": 36
+  },
+  "consequence": "POST /account/password calls req.get('authorization').slice(7) with no null check, so a request without an Authorization header crashes the handler with a TypeError before the password is changed, returning 500 instead of 401.",
+  "fix": "Check the header before slicing it.",
+  "ladder": [
+   {
+    "question": "Where does the handler get the current token?",
+    "expected_realization": "From the Authorization header."
+   },
+   {
+    "question": "What if that header is missing?",
+    "expected_realization": "get() returns undefined."
+   },
+   {
+    "question": "What does undefined.slice(7) do on line 30?",
+    "expected_realization": "It throws a TypeError."
+   }
+  ],
+  "verdict": "pending"
+ },
+ {
+  "concept_id": "checkout-customer-1",
+  "severity": "critical",
+  "lines": {
+   "file": "src/routes/checkout.js",
+   "start": 66,
+   "end": 71
+  },
+  "consequence": "Checkout passes req.user.stripe_customer_id to payments.charge, but req.user is loaded from the session and has no stripe_customer_id field, so every charge is created with customer undefined and fails for every order.",
+  "fix": "Load the user's Stripe customer id before charging.",
+  "ladder": [
+   {
+    "question": "Which customer does checkout charge?",
+    "expected_realization": "req.user.stripe_customer_id."
+   },
+   {
+    "question": "Where does req.user come from?",
+    "expected_realization": "The auth middleware."
+   },
+   {
+    "question": "Which columns does it load?",
+    "expected_realization": "Not stripe_customer_id, so it is undefined."
+   }
+  ],
+  "verdict": "pending"
+ }
+]

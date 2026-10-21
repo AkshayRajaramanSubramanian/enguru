@@ -1,0 +1,14 @@
+{
+  "name": "teamnotes",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Small team notes API: users keep private notes and tag them.",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.3",
+    "express": "^4.19.2"
+  }
+}

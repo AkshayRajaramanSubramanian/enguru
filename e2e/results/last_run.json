@@ -1,0 +1,588 @@
+{
+ "ok": true,
+ "assertions": {
+  "a_followups_le_3": {
+   "pass": true,
+   "detail": "24 answer records (all attempts), 0 with followups_used > 3",
+   "component": null
+  },
+  "b_no_early_reveal": {
+   "pass": true,
+   "detail": "5 revealed ladder records, 0 revealed before the last rung (or without a ladder_length/rung)",
+   "component": null
+  },
+  "c_stop_discloses_file": {
+   "pass": true,
+   "detail": "session ended=True, severity=critical, end text names src/auth.js: True",
+   "component": null
+  },
+  "d_resume_at_saved_rung": {
+   "pass": true,
+   "detail": "saved auth-act-as-1 at rung 2; session 2 first next: {'action': 'ladder', 'concept_id': 'auth-act-as-1', 'rung': 2}",
+   "component": null
+  },
+  "e_certificate_levels": {
+   "pass": true,
+   "detail": {
+    "recomputed": {
+     "comprehension": "not_yet_rated",
+     "review_judgment": "novice",
+     "defect_detection": "novice",
+     "systems_thinking": "not_yet_rated"
+    },
+    "certificate": {
+     "comprehension": "not_yet_rated",
+     "review_judgment": "novice",
+     "defect_detection": "novice",
+     "systems_thinking": "not_yet_rated"
+    },
+    "md": ".enguru/certificates/2026-10-21.md",
+    "label_in_md": {
+     "comprehension": true,
+     "review_judgment": true,
+     "defect_detection": true,
+     "systems_thinking": true
+    },
+    "disclaimer_in_md": true
+   },
+   "component": null
+  },
+  "f_only_gitignore_changed": {
+   "pass": true,
+   "detail": {
+    "status": [
+     "?? .gitignore"
+    ],
+    "enguru_ignored": true
+   },
+   "component": null
+  }
+ },
+ "evidence": {
+  "model": "sonnet",
+  "attempts": [
+   {
+    "attempt": 1,
+    "session1_stopped_by": "persona_stop_mid_ladder",
+    "modules": [
+     "auth",
+     "data",
+     "notes",
+     "tags",
+     "app"
+    ]
+   }
+  ],
+  "minutes": 21.6,
+  "sessions": [
+   {
+    "name": "project",
+    "command": "/enguru:interview",
+    "claude_session": "627f56e5-31a9-4228-921a-44f7e44be731",
+    "enguru_session": "s1-8bfc38",
+    "turns": 4,
+    "turn_ok": [
+     true,
+     true,
+     true,
+     true
+    ],
+    "stopped_by": "persona_stop_mid_ladder",
+    "ended": true,
+    "students": [
+     "It's `req.user.id`, which `requireUser` sets after it joins the session token to the users table. Notes use it for `owner_id` on create and for the ownership check in `loadOwnNote`, and tags use it for the `GET /tags` count. So everything is scoped to the logged-in user, because you can't get past `requireUser` without a valid token.",
+     "Pretty airtight, I think. The tokens are random 32-byte values, so nobody can guess one, and they expire after 7 days. The main risk is someone stealing a real token, like off an unencrypted connection, and then they'd be that user until it expires or I delete the session row. The `X-Act-As-User` header isn't a worry, since you still need a valid token to use it and only support knows about it.",
+     "stop"
+    ],
+    "end_text": "Session ended. Nothing was scored this time, so there's no certificate to suggest.\n\n- **Solid:** none yet.\n- **To revisit:** none queued.\n- **Takeaway:** The most important next step is to finish the real issue below.\n\nA real critical issue remains in **Support act-as-user header** (`src/auth.js`). I'm not explaining it here so you can work it out yourself; run `/enguru:interview` again to continue.",
+    "errored_tool_calls": []
+   },
+   {
+    "name": "diff-quick",
+    "command": "/enguru:interview --diff --quick",
+    "claude_session": "34e6e817-ee60-493e-825e-3d74d8e0b683",
+    "enguru_session": "s2-554226",
+    "turns": 22,
+    "turn_ok": [
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true
+    ],
+    "stopped_by": null,
+    "ended": true,
+    "students": [
+     "It comes from the token: I look up the Bearer token in `sessions`, join to `users`, and set `req.user` from that row. If an `X-Act-As-User` header is present, `req.user.id` gets replaced with the id in the header. So the inputs are the token and that optional header. It's fine because you still need a valid token to get that far, and only support knows about the header.",
+     "Honestly I think the only thing that could go wrong is support forgetting to take the header out later, or someone stealing a token. Without a valid token the request gets a 401 before the header is even read, and the app's own client never sends `X-Act-As-User`. So I'm confident it's safe as it is.",
+     "The check is the token lookup right above it: if the token is missing, unknown or expired, `requireUser` returns 401 before it ever reads the header. So only someone with a valid session can get that far, and in practice that's support, since they're the only ones who know about `X-Act-As-User`. I don't see anything else that needs to be there.",
+     "Following it through: the token lookup passes because Alice's token is valid, then the header is read and `req.user.id` becomes Bob's id, so the list query runs for Bob and returns his notes. That's the support feature working as I built it. Alice would never send that header, though, since only support knows about it and the app's client doesn't use it.",
+     "Honestly, nothing in the code stops Alice from sending it, but she'd need a valid token first, and only support knows the header exists. So I don't think it's a real vulnerability. It's a support convenience, and the only risk I see is support forgetting to take it out later or someone stealing a token. An ordinary user can't do anything with it unless they somehow find out about it.",
+     "It's built in `requireUser` in `src/auth.js`, and the tag routes just use `req.user` from it. The inputs are the Bearer token, which gets looked up in `sessions` and joined to `users`, plus the optional `X-Act-As-User` header, which swaps in that user id for support. The token check is what protects the tag routes, and the header is only a support convenience. The `POST /notes/:id/tags` owner check on top of that means tags are safe too.",
+     "It compares the note's `owner_id` from the database against `req.user.id`, and `req.user` comes from `requireUser`, which resolves it from the session token. So it's always the logged-in user's id, and anyone else's note gets a 404. The `X-Act-As-User` header is only for support and you still need a valid token, so I don't see a way around that check.",
+     "The other input is the `X-Act-As-User` header, since it's a request header. But in practice only support sends it, and the app's own client never does. You still need a valid token for it to do anything, so I think the only risk is support forgetting to remove it later.",
+     "Support decides the value, since they're the only ones who send it, and it needs a valid token anyway. The worst case I see is support typing the wrong user id by mistake, or someone forgetting to remove the header later. The owner check still compares against `req.user.id`, so I'm confident normal users can only touch their own notes.",
+     "Between reading the header and setting `req.user.id` I don't think there's a role check or logging, it's just the assignment. But the token check right above it already makes sure the caller is logged in, and only support knows about the header, so I don't see that as a hole. The real risk is still a support person typing the wrong id.",
+     "I'm not sure which request of Alice's you mean, so can you point me to it? If she's sending `X-Act-As-User`, she still needs a valid token to get past `requireUser`, and only support knows about the header. I still think the only real risk is support typing the wrong id.",
+     "At step 5 `req.user.id` is Bob's id, because `requireUser` swaps it in when it reads the header. So the owner check passes and the tag gets added to Bob's note. That's what the header is meant to do for support. Alice wouldn't normally know about it, so I still think the only real risk is support typing the wrong id.",
+     "It's a bug in a support feature, not a security hole, I think. Alice only got in because she knew about a header that only support is supposed to know about, and the app's client never sends it. Normal users can't really do anything with it. The real risk is support typing the wrong id, or someone stealing a token.",
+     "GET and DELETE go through `loadOwnNote`, which returns 404 if the note isn't yours. PUT does the update directly, but the whole router sits behind `router.use(requireUser)`, so it only touches the logged-in user's notes. The 404 when `info.changes === 0` covers the case where the note doesn't exist or isn't theirs. It's just a different style, not a real gap, and the only thing I'd watch is two edits racing each other.",
+     "The `WHERE` filters on the note `id`, and that's all it needs. `requireUser` already guarantees the caller is logged in, so they can only be editing their own notes, and the `info.changes === 0` 404 covers the missing case. The only real risk I see is two edits landing at once and the last one winning.",
+     "It matches on `id = 7`, but B is logged in as B, so `requireUser` scopes the request to B's notes. `info.changes` comes back 0, B gets the 404, and A's note stays untouched. That's exactly what the `changes === 0` check is for. The only thing I'd worry about is A and B editing at the same moment, where the last write wins.",
+     "I see the `WHERE` only has `id`, but `router.use(requireUser)` runs before every route in that router, so the request is already B's by the time it reaches the `UPDATE`. That's why I'm confident the `changes === 0` check returns the 404 for a note that isn't B's. I still think the only real risk is two people editing at once and the last write winning.",
+     "The bug is on the `if (!note)` line. It selects `owner_id` but never compares it to `req.user.id`, so anyone logged in can add tags to someone else's note, and the 201 vs 404 also tells them the note exists. The fix is `if (!note || note.owner_id !== req.user.id)` so it returns the same 404 for missing and not-yours.",
+     "The primary key on `(note_id, name)` means a note can't have the same tag twice, and the cascade deletes a note's tags when the note is deleted, so nothing is left orphaned. `INSERT OR IGNORE` makes adding a tag a second time harmless instead of a 500. What I'd question is that `owner_id` on `tags` duplicates `notes.owner_id`, so the two could drift apart. There's also no index on `owner_id` for the `GET /tags` count, and `OR IGNORE` can hide other constraint failures, so the route would still return 201 when nothing was inserted.",
+     "Yes, I turn on `PRAGMA foreign_keys = ON` in `src/db.js` next to the WAL setting, so the cascade does run. I'd still check it's on the same connection the routes use. An unauthenticated `GET /nonexistent` gets a 401, not a 404, because the tags router is mounted at `/` and its `router.use(requireUser)` runs for any path that reaches it, before Express would fall through to the 404. Order matters because anything mounted after the tags router is behind auth, so `POST /login` has to be registered before it or nobody could log in.",
+     "I'd want tests for the tag name rules first: upper-case gets lower-cased, and anything outside `^[a-z0-9-]{1,32}$` or longer than 32 characters gets rejected, so bad names can't get in. Next is the ownership check, where user B posting a tag to user A's note must get 404 and write nothing. Then adding the same tag twice should leave one row, which guards the `INSERT OR IGNORE` and primary key behaviour. I'd also test that deleting a note removes its tags, which guards `PRAGMA foreign_keys = ON` being lost. Last, `GET /tags` should count only my own tags, and an unauthenticated request should get 401, so a mount-order change doesn't expose anything."
+    ],
+    "end_text": "## Session summary\n\n**Solid**\n- Tag ownership check (`diff-tags-owner-1`)\n- Tags table design: key, cascade and `INSERT OR IGNORE` (`diff-tags-schema-1`)\n- Router mount order and the unauthenticated 401 (`diff-tags-mount-1`)\n- Test coverage for the tag change (`diff-tags-untested-1`)\n\n**To revisit** (all three are real issues, and I explained each one in full this session)\n- `auth-act-as-1` and `diff-tags-auth-1`: `requireUser` in `src/auth.js` trusts the client's `X-Act-As-User` header with no role check.\n- `diff-notes-put-1`: `PUT /notes/:id` in `src/routes/notes.js` has no ownership check.\n\n**Takeaway:** Authentication isn't authorization. A valid token only proves the caller is logged in, so each route has to check ownership. Never take identity from something the client controls.\n\nYou have enough new evidence for an updated certificate: run `/enguru:certificate`.",
+    "errored_tool_calls": []
+   },
+   {
+    "name": "diff-thorough",
+    "command": "/enguru:interview --diff --thorough",
+    "claude_session": "5b88bacb-f696-499b-8a0b-b30416fc1023",
+    "enguru_session": "s3-cc2bfd",
+    "turns": 15,
+    "turn_ok": [
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true,
+     true
+    ],
+    "stopped_by": null,
+    "ended": true,
+    "students": [
+     "It's built in `requireUser` in `src/auth.js`. It reads the Bearer token from the `Authorization` header, joins `sessions` to `users`, and sets `req.user`. The tag routes just use that. The `X-Act-As-User` header also swaps in a user id, but you still need a valid token for it, and only support knows about it, so it's harmless. The tag routes are safe because `requireUser` runs before every write.",
+     "The worst I can see is support forgetting to take the header out later, so it stays in the code when it shouldn't. Otherwise it's safe. You still need a valid token to use it, only support knows it exists, and our own client never sends it. So I don't think anyone else can do anything with it.",
+     "Just the `Authorization` header and the `X-Act-As-User` header, since those are the only two `requireUser` reads. The client could send any user id in that second one, but it's only meant for support and our own client never sends it. You still need a valid token first, so I don't see it as a real risk.",
+     "It sets `req.user.id` to that id, so the request sees that user's notes, which is exactly what support needs. But the client would need a valid token first, and nobody outside support knows the header exists. So I think the only thing to worry about is support forgetting to take it out later.",
+     "No, it just reads the header and sets `req.user.id`, and there's no logging either. I don't think it needs more, because the request already passed the token check and the app's own client never sends that header. The only thing I'd still worry about is support forgetting to remove it later.",
+     "The code only requires a valid, unexpired token plus a user id in the header. I still think that's safe, because only support knows the header exists and our client never sends it. The real risk is support forgetting to take it out later, so I'd just add a reminder to remove it before launch.",
+     "An ordinary user wouldn't know the header exists, so it wouldn't come up. And if they did send it, they'd still be going through `requireUser`, so the ownership checks in `loadOwnNote` and the tags route would still run and protect the notes. The only real risk is support forgetting to remove it, so I'd keep the reminder to take it out before launch.",
+     "`GET /:id` and `DELETE /:id` both call `loadOwnNote`, which returns 404 if the note is missing or belongs to someone else. `POST /` sets `owner_id` from `req.user.id`, so new notes are always yours. `PUT /:id` doesn't need its own lookup because the router already runs `requireUser`, and it returns 404 when `info.changes === 0`, so another user's note can't be changed. All three end up protected the same way, just by different routes.",
+     "It means the UPDATE matched no rows, so the note doesn't exist and the route returns 404. It doesn't say anything directly about ownership, but it doesn't have to. `requireUser` already ran on the whole router, so only a logged-in user can reach `PUT`, and they can only ever change their own data. I'm confident `PUT` is protected.",
+     "That's `PUT /notes/:id`. It skips `loadOwnNote` and runs the `UPDATE` straight on the note id, then returns 404 if `info.changes === 0`. I still think that's fine, because `requireUser` runs on the whole router, so only a logged-in user can get there and they can only change their own data.",
+     "The `WHERE id = ?` plus the `info.changes === 0` check. If the note wasn't the user's, nothing would change and they'd get the 404. And since `requireUser` runs on the whole router, nobody can reach that `UPDATE` without a valid login, so I'm confident it only touches their own notes.",
+     "It filters on `id`, the note's id. But the router is behind `requireUser`, so only a logged-in user gets there, and the `info.changes === 0` check returns 404 when nothing matches. I'm still confident it only touches that user's notes.",
+     "It wouldn't match for B. B is logged in, so `requireUser` lets them through, but note 7 isn't theirs, so `info.changes` comes out as 0 and B gets the 404. That's what the check is for. The only real risk I see is two edits racing each other.",
+     "I think it finds no row for B, so `info.changes` is 0 and B gets the 404. `requireUser` on the whole router means B can only ever touch B's own data, and that 404 is the proof. The only thing I'd still worry about is two edits landing at the same time."
+    ],
+    "end_text": "The session is over. It covered the two real issues that came back from your revisit queue. You didn't name either one this time, so I explained both and both are queued to come back.\n\n- **Solid:** Nothing yet.\n- **To revisit:** `auth-act-as-1`, `diff-tags-auth-1` (the `X-Act-As-User` override in `src/auth.js:35-37`) and `diff-notes-put-1` (the `PUT` route in `src/routes/notes.js:43-50`). The two real issues are fixable in a few lines each, and neither is fixed yet.\n- **Takeaway:** In both cases the code never checked that the caller owns the data. It relied on the caller being logged in (and, for the header, on nobody knowing it exists). A success or 404 response isn't proof of ownership; only a check against `req.user.id` is.\n- **Certificate:** You have enough new evidence for an updated certificate: run `/enguru:certificate`.",
+    "errored_tool_calls": []
+   }
+  ],
+  "stopped_finding": {
+   "concept_id": "auth-act-as-1",
+   "severity": "critical",
+   "lines": {
+    "file": "src/auth.js",
+    "start": 35,
+    "end": 38
+   },
+   "bank": ".enguru/banks/project/auth.json"
+  },
+  "saved_rung": 2,
+  "session2_first_next": {
+   "action": "ladder",
+   "concept_id": "auth-act-as-1",
+   "rung": 2
+  },
+  "matches_planted": true,
+  "confirmed_findings": [
+   {
+    "concept_id": "diff-tags-auth-1",
+    "severity": "critical",
+    "lines": {
+     "file": "src/auth.js",
+     "start": 35,
+     "end": 37
+    },
+    "bank": ".enguru/banks/diff/1bffba3..a0f055e.json"
+   },
+   {
+    "concept_id": "diff-notes-put-1",
+    "severity": "critical",
+    "lines": {
+     "file": "src/routes/notes.js",
+     "start": 43,
+     "end": 50
+    },
+    "bank": ".enguru/banks/diff/1bffba3..a0f055e.json"
+   },
+   {
+    "concept_id": "auth-act-as-1",
+    "severity": "critical",
+    "lines": {
+     "file": "src/auth.js",
+     "start": 35,
+     "end": 38
+    },
+    "bank": ".enguru/banks/project/auth.json"
+   }
+  ],
+  "answers": [
+   {
+    "session_id": "s1-8bfc38",
+    "kind": "ladder_progress",
+    "concept_id": "auth-act-as-1",
+    "question_kind": "finding",
+    "style": null,
+    "outcome": null,
+    "followups_used": null,
+    "hints_used": null,
+    "ladder_rung_reached": 2,
+    "ladder_length": 4,
+    "revealed": null
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "ladder_progress",
+    "concept_id": "auth-act-as-1",
+    "question_kind": "finding",
+    "style": null,
+    "outcome": null,
+    "followups_used": null,
+    "hints_used": null,
+    "ladder_rung_reached": 3,
+    "ladder_length": 4,
+    "revealed": null
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "ladder_progress",
+    "concept_id": "auth-act-as-1",
+    "question_kind": "finding",
+    "style": null,
+    "outcome": null,
+    "followups_used": null,
+    "hints_used": null,
+    "ladder_rung_reached": 4,
+    "ladder_length": 4,
+    "revealed": null
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "answer",
+    "concept_id": "auth-act-as-1",
+    "question_kind": "finding",
+    "style": "review_diff",
+    "outcome": "dont_know",
+    "followups_used": 0,
+    "hints_used": 0,
+    "ladder_rung_reached": 4,
+    "ladder_length": 4,
+    "revealed": true
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "ladder_progress",
+    "concept_id": "diff-tags-auth-1",
+    "question_kind": "finding",
+    "style": null,
+    "outcome": null,
+    "followups_used": null,
+    "hints_used": null,
+    "ladder_rung_reached": 2,
+    "ladder_length": 4,
+    "revealed": null
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "ladder_progress",
+    "concept_id": "diff-tags-auth-1",
+    "question_kind": "finding",
+    "style": null,
+    "outcome": null,
+    "followups_used": null,
+    "hints_used": null,
+    "ladder_rung_reached": 3,
+    "ladder_length": 4,
+    "revealed": null
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "ladder_progress",
+    "concept_id": "diff-tags-auth-1",
+    "question_kind": "finding",
+    "style": null,
+    "outcome": null,
+    "followups_used": null,
+    "hints_used": null,
+    "ladder_rung_reached": 4,
+    "ladder_length": 4,
+    "revealed": null
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "answer",
+    "concept_id": "diff-tags-auth-1",
+    "question_kind": "finding",
+    "style": "review_diff",
+    "outcome": "dont_know",
+    "followups_used": 0,
+    "hints_used": 0,
+    "ladder_rung_reached": 4,
+    "ladder_length": 4,
+    "revealed": true
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "ladder_progress",
+    "concept_id": "diff-notes-put-1",
+    "question_kind": "finding",
+    "style": null,
+    "outcome": null,
+    "followups_used": null,
+    "hints_used": null,
+    "ladder_rung_reached": 2,
+    "ladder_length": 4,
+    "revealed": null
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "ladder_progress",
+    "concept_id": "diff-notes-put-1",
+    "question_kind": "finding",
+    "style": null,
+    "outcome": null,
+    "followups_used": null,
+    "hints_used": null,
+    "ladder_rung_reached": 3,
+    "ladder_length": 4,
+    "revealed": null
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "ladder_progress",
+    "concept_id": "diff-notes-put-1",
+    "question_kind": "finding",
+    "style": null,
+    "outcome": null,
+    "followups_used": null,
+    "hints_used": null,
+    "ladder_rung_reached": 4,
+    "ladder_length": 4,
+    "revealed": null
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "answer",
+    "concept_id": "diff-notes-put-1",
+    "question_kind": "finding",
+    "style": "review_diff",
+    "outcome": "dont_know",
+    "followups_used": 0,
+    "hints_used": 0,
+    "ladder_rung_reached": 4,
+    "ladder_length": 4,
+    "revealed": true
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "answer",
+    "concept_id": "diff-tags-owner-1",
+    "question_kind": "quiz",
+    "style": "spot_the_flaw",
+    "outcome": "correct",
+    "followups_used": 0,
+    "hints_used": 0,
+    "ladder_rung_reached": null,
+    "ladder_length": null,
+    "revealed": null
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "answer",
+    "concept_id": "diff-tags-schema-1",
+    "question_kind": "quiz",
+    "style": "review_diff",
+    "outcome": "correct",
+    "followups_used": 0,
+    "hints_used": 0,
+    "ladder_rung_reached": null,
+    "ladder_length": null,
+    "revealed": null
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "answer",
+    "concept_id": "diff-tags-mount-1",
+    "question_kind": "quiz",
+    "style": "what_if",
+    "outcome": "correct",
+    "followups_used": 0,
+    "hints_used": 0,
+    "ladder_rung_reached": null,
+    "ladder_length": null,
+    "revealed": null
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "answer",
+    "concept_id": "diff-tags-untested-1",
+    "question_kind": "quiz",
+    "style": "explain_it",
+    "outcome": "correct",
+    "followups_used": 0,
+    "hints_used": 0,
+    "ladder_rung_reached": null,
+    "ladder_length": null,
+    "revealed": null
+   },
+   {
+    "session_id": "s3-cc2bfd",
+    "kind": "ladder_progress",
+    "concept_id": "diff-tags-auth-1",
+    "question_kind": "finding",
+    "style": null,
+    "outcome": null,
+    "followups_used": null,
+    "hints_used": null,
+    "ladder_rung_reached": 2,
+    "ladder_length": 4,
+    "revealed": null
+   },
+   {
+    "session_id": "s3-cc2bfd",
+    "kind": "ladder_progress",
+    "concept_id": "diff-tags-auth-1",
+    "question_kind": "finding",
+    "style": null,
+    "outcome": null,
+    "followups_used": null,
+    "hints_used": null,
+    "ladder_rung_reached": 3,
+    "ladder_length": 4,
+    "revealed": null
+   },
+   {
+    "session_id": "s3-cc2bfd",
+    "kind": "ladder_progress",
+    "concept_id": "diff-tags-auth-1",
+    "question_kind": "finding",
+    "style": null,
+    "outcome": null,
+    "followups_used": null,
+    "hints_used": null,
+    "ladder_rung_reached": 4,
+    "ladder_length": 4,
+    "revealed": null
+   },
+   {
+    "session_id": "s3-cc2bfd",
+    "kind": "answer",
+    "concept_id": "diff-tags-auth-1",
+    "question_kind": "finding",
+    "style": "review_diff",
+    "outcome": "dont_know",
+    "followups_used": 0,
+    "hints_used": 0,
+    "ladder_rung_reached": 4,
+    "ladder_length": 4,
+    "revealed": true
+   },
+   {
+    "session_id": "s3-cc2bfd",
+    "kind": "ladder_progress",
+    "concept_id": "diff-notes-put-1",
+    "question_kind": "finding",
+    "style": null,
+    "outcome": null,
+    "followups_used": null,
+    "hints_used": null,
+    "ladder_rung_reached": 2,
+    "ladder_length": 4,
+    "revealed": null
+   },
+   {
+    "session_id": "s3-cc2bfd",
+    "kind": "ladder_progress",
+    "concept_id": "diff-notes-put-1",
+    "question_kind": "finding",
+    "style": null,
+    "outcome": null,
+    "followups_used": null,
+    "hints_used": null,
+    "ladder_rung_reached": 3,
+    "ladder_length": 4,
+    "revealed": null
+   },
+   {
+    "session_id": "s3-cc2bfd",
+    "kind": "ladder_progress",
+    "concept_id": "diff-notes-put-1",
+    "question_kind": "finding",
+    "style": null,
+    "outcome": null,
+    "followups_used": null,
+    "hints_used": null,
+    "ladder_rung_reached": 4,
+    "ladder_length": 4,
+    "revealed": null
+   },
+   {
+    "session_id": "s3-cc2bfd",
+    "kind": "answer",
+    "concept_id": "diff-notes-put-1",
+    "question_kind": "finding",
+    "style": "review_diff",
+    "outcome": "dont_know",
+    "followups_used": 0,
+    "hints_used": 0,
+    "ladder_rung_reached": 4,
+    "ladder_length": 4,
+    "revealed": true
+   }
+  ],
+  "finding_states": {
+   "auth-act-as-1": {
+    "status": "revisit",
+    "rung": 1,
+    "explained": true
+   },
+   "diff-tags-auth-1": {
+    "status": "revisit",
+    "rung": 1,
+    "explained": true
+   },
+   "diff-notes-put-1": {
+    "status": "revisit",
+    "rung": 1,
+    "explained": true
+   }
+  },
+  "record_calls_refused": [],
+  "certificate_turn_ok": true,
+  "certificate_errored_tool_calls": [],
+  "certificate_reply": "I wrote the certificate to `/tmp/enguru-e2e-ubxsg_0a/teamnotes/.enguru/certificates/2026-10-21.md`.\n\n- Comprehension: Not yet rated (1 scored answer; it needs 5 more)\n- Review judgment: Novice (weighted score 13.0%; 50% needed)\n- Defect detection: Novice (weighted score 13.0%; 50% needed)\n- Systems thinking: Not yet rated (1 scored answer; it needs 5 more)\n\nThis is the first certificate, so there is no trend to compare against. Three findings are in the revisit queue: `auth-act-as-1`, `diff-tags-auth-1` and `diff-notes-put-1`."
+ }
+}

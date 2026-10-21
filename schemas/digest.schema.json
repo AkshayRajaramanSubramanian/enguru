@@ -1,0 +1,179 @@
+{
+  "type": "object",
+  "properties": {
+    "version": {
+      "enum": [
+        1
+      ]
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "scope": {
+          "type": "string"
+        },
+        "range_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessions_found": {
+          "type": "integer"
+        },
+        "sessions_used": {
+          "type": "integer"
+        },
+        "events_kept": {
+          "type": "integer"
+        },
+        "events_dropped": {
+          "type": "integer"
+        },
+        "fallback_chunks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "skipped_lines": {
+          "type": "integer"
+        },
+        "truncation": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "event_counts": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "scope",
+        "range_id",
+        "sessions_found",
+        "sessions_used",
+        "events_kept",
+        "events_dropped",
+        "fallback_chunks",
+        "skipped_lines",
+        "truncation"
+      ],
+      "additionalProperties": false
+    },
+    "file_map": {
+      "type": "object"
+    },
+    "git": {
+      "type": "object"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "request",
+              "choice",
+              "pushback",
+              "churn",
+              "dependency",
+              "revert"
+            ]
+          },
+          "paraphrase": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timestamp": {
+            "type": "string"
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "turn_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "commit": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "haiku",
+              "rules",
+              "keywords"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "paraphrase",
+          "files",
+          "session_id",
+          "timestamp",
+          "source",
+          "origin"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "diff": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "hunks": {
+          "type": "array"
+        },
+        "excluded": {
+          "type": "array"
+        },
+        "blast_radius_candidates": {
+          "type": "array"
+        }
+      },
+      "required": [
+        "hunks",
+        "excluded",
+        "blast_radius_candidates"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "version",
+    "meta",
+    "file_map",
+    "git",
+    "events",
+    "diff"
+  ],
+  "additionalProperties": false
+}

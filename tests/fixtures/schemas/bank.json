@@ -1,0 +1,82 @@
+{
+  "scope_key": "project",
+  "concepts": [
+    {
+      "id": "c1",
+      "module": "m1",
+      "title": "T",
+      "why_it_matters": "w",
+      "risk_tier": 2,
+      "kind": "quiz",
+      "evidence_refs": [
+        {
+          "file": "a.py",
+          "lines": [
+            1,
+            5
+          ]
+        },
+        {
+          "commit": "abc"
+        }
+      ],
+      "evidence_hashes": {}
+    }
+  ],
+  "questions": [
+    {
+      "id": "q1",
+      "concept_id": "c1",
+      "style": "explain_it",
+      "skill": "comprehension",
+      "difficulty": "foundational",
+      "prompt": "p",
+      "context": "c",
+      "answer_key": {
+        "must_have": [
+          {
+            "point": "p",
+            "explanation": "e",
+            "evidence_ref": {
+              "file": "a.py",
+              "lines": [
+                1,
+                2
+              ]
+            }
+          }
+        ],
+        "nice_to_have": [],
+        "misconceptions": []
+      }
+    }
+  ],
+  "findings": [
+    {
+      "concept_id": "c1",
+      "severity": "major",
+      "lines": {
+        "file": "a.py",
+        "start": 1,
+        "end": 2
+      },
+      "consequence": "c",
+      "fix": "f",
+      "ladder": [
+        {
+          "question": "q",
+          "expected_realization": "r"
+        },
+        {
+          "question": "q",
+          "expected_realization": "r"
+        },
+        {
+          "question": "q",
+          "expected_realization": "r"
+        }
+      ],
+      "verdict": "pending"
+    }
+  ]
+}

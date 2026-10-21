@@ -1,0 +1,35 @@
+{
+  "type": "object",
+  "properties": {
+    "concept_id": {
+      "type": "string"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "verify",
+        "fix_check"
+      ]
+    },
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "confirmed",
+        "refuted",
+        "uncertain",
+        "fixed",
+        "still_present"
+      ]
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "concept_id",
+    "mode",
+    "verdict",
+    "reason"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,8 @@
+{"base": {"correct": 1.0, "partial": 0.5, "partial_misconception": 0.25, "incorrect": 0.0, "dont_know": 0.0},
+ "hint_mult": [1.0, 0.8, 0.6], "followup_mult": [1.0, 0.85, 0.7, 0.55],
+ "invalid_fix_mult": 0.75, "difficulty_weight": {"foundational": 1, "intermediate": 1.5, "advanced": 2},
+ "window": 20,
+ "suggest_certificate_min": 6,
+ "levels": {"min_rated": 6, "developing_pct": 50,
+   "proficient": {"min": 10, "min_intermediate_plus": 3, "min_advanced_attempted": 1, "pct": 70, "misconception_repeat": 2},
+   "senior_ready": {"min": 15, "min_advanced": 3, "advanced_pct": 80, "min_diff_ranges": 2, "requires_project": true}}}

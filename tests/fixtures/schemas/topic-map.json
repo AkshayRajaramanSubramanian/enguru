@@ -1,0 +1,280 @@
+{
+  "modules": [
+    {
+      "id": "m0",
+      "title": "M",
+      "concepts": [
+        {
+          "id": "c00",
+          "module": "m1",
+          "title": "T",
+          "why_it_matters": "w",
+          "risk_tier": 2,
+          "kind": "quiz",
+          "evidence_refs": [
+            {
+              "file": "a.py",
+              "lines": [
+                1,
+                5
+              ]
+            },
+            {
+              "commit": "abc"
+            }
+          ],
+          "evidence_hashes": {}
+        },
+        {
+          "id": "c01",
+          "module": "m1",
+          "title": "T",
+          "why_it_matters": "w",
+          "risk_tier": 2,
+          "kind": "quiz",
+          "evidence_refs": [
+            {
+              "file": "a.py",
+              "lines": [
+                1,
+                5
+              ]
+            },
+            {
+              "commit": "abc"
+            }
+          ],
+          "evidence_hashes": {}
+        },
+        {
+          "id": "c02",
+          "module": "m1",
+          "title": "T",
+          "why_it_matters": "w",
+          "risk_tier": 2,
+          "kind": "quiz",
+          "evidence_refs": [
+            {
+              "file": "a.py",
+              "lines": [
+                1,
+                5
+              ]
+            },
+            {
+              "commit": "abc"
+            }
+          ],
+          "evidence_hashes": {}
+        }
+      ]
+    },
+    {
+      "id": "m1",
+      "title": "M",
+      "concepts": [
+        {
+          "id": "c10",
+          "module": "m1",
+          "title": "T",
+          "why_it_matters": "w",
+          "risk_tier": 2,
+          "kind": "quiz",
+          "evidence_refs": [
+            {
+              "file": "a.py",
+              "lines": [
+                1,
+                5
+              ]
+            },
+            {
+              "commit": "abc"
+            }
+          ],
+          "evidence_hashes": {}
+        },
+        {
+          "id": "c11",
+          "module": "m1",
+          "title": "T",
+          "why_it_matters": "w",
+          "risk_tier": 2,
+          "kind": "quiz",
+          "evidence_refs": [
+            {
+              "file": "a.py",
+              "lines": [
+                1,
+                5
+              ]
+            },
+            {
+              "commit": "abc"
+            }
+          ],
+          "evidence_hashes": {}
+        },
+        {
+          "id": "c12",
+          "module": "m1",
+          "title": "T",
+          "why_it_matters": "w",
+          "risk_tier": 2,
+          "kind": "quiz",
+          "evidence_refs": [
+            {
+              "file": "a.py",
+              "lines": [
+                1,
+                5
+              ]
+            },
+            {
+              "commit": "abc"
+            }
+          ],
+          "evidence_hashes": {}
+        }
+      ]
+    },
+    {
+      "id": "m2",
+      "title": "M",
+      "concepts": [
+        {
+          "id": "c20",
+          "module": "m1",
+          "title": "T",
+          "why_it_matters": "w",
+          "risk_tier": 2,
+          "kind": "quiz",
+          "evidence_refs": [
+            {
+              "file": "a.py",
+              "lines": [
+                1,
+                5
+              ]
+            },
+            {
+              "commit": "abc"
+            }
+          ],
+          "evidence_hashes": {}
+        },
+        {
+          "id": "c21",
+          "module": "m1",
+          "title": "T",
+          "why_it_matters": "w",
+          "risk_tier": 2,
+          "kind": "quiz",
+          "evidence_refs": [
+            {
+              "file": "a.py",
+              "lines": [
+                1,
+                5
+              ]
+            },
+            {
+              "commit": "abc"
+            }
+          ],
+          "evidence_hashes": {}
+        },
+        {
+          "id": "c22",
+          "module": "m1",
+          "title": "T",
+          "why_it_matters": "w",
+          "risk_tier": 2,
+          "kind": "quiz",
+          "evidence_refs": [
+            {
+              "file": "a.py",
+              "lines": [
+                1,
+                5
+              ]
+            },
+            {
+              "commit": "abc"
+            }
+          ],
+          "evidence_hashes": {}
+        }
+      ]
+    },
+    {
+      "id": "m3",
+      "title": "M",
+      "concepts": [
+        {
+          "id": "c30",
+          "module": "m1",
+          "title": "T",
+          "why_it_matters": "w",
+          "risk_tier": 2,
+          "kind": "quiz",
+          "evidence_refs": [
+            {
+              "file": "a.py",
+              "lines": [
+                1,
+                5
+              ]
+            },
+            {
+              "commit": "abc"
+            }
+          ],
+          "evidence_hashes": {}
+        },
+        {
+          "id": "c31",
+          "module": "m1",
+          "title": "T",
+          "why_it_matters": "w",
+          "risk_tier": 2,
+          "kind": "quiz",
+          "evidence_refs": [
+            {
+              "file": "a.py",
+              "lines": [
+                1,
+                5
+              ]
+            },
+            {
+              "commit": "abc"
+            }
+          ],
+          "evidence_hashes": {}
+        },
+        {
+          "id": "c32",
+          "module": "m1",
+          "title": "T",
+          "why_it_matters": "w",
+          "risk_tier": 2,
+          "kind": "quiz",
+          "evidence_refs": [
+            {
+              "file": "a.py",
+              "lines": [
+                1,
+                5
+              ]
+            },
+            {
+              "commit": "abc"
+            }
+          ],
+          "evidence_hashes": {}
+        }
+      ]
+    }
+  ]
+}
