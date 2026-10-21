@@ -38,12 +38,18 @@ def _is_git_repo(cwd):
     return r.returncode == 0 and r.stdout.strip() == "true"
 
 
+def _transcripts_root(flag=None):
+    """--transcripts-root, else $ENGURU_TRANSCRIPTS_ROOT, else ~/.claude/projects."""
+    raw = flag or os.environ.get("ENGURU_TRANSCRIPTS_ROOT")
+    return Path(raw) if raw else Path.home() / ".claude" / "projects"
+
+
 def cmd_check(args):
     emit({
         "ok": True,
         "python": "%d.%d.%d" % sys.version_info[:3],
         "git": _is_git_repo(os.getcwd()),
-        "transcripts_dir": (Path.home() / ".claude" / "projects").is_dir(),
+        "transcripts_dir": _transcripts_root().is_dir(),
     })
 
 
@@ -59,7 +65,7 @@ def _repo_root(cwd):
 def cmd_digest_prep(args):
     from enguru_lib import digest
     repo = _repo_root(os.getcwd())
-    root = Path(args.transcripts_root) if args.transcripts_root else Path.home() / ".claude" / "projects"
+    root = _transcripts_root(args.transcripts_root)
     try:
         scope = digest.resolve_scope(repo, not args.diff, args.range, args.uncommitted)
         if scope.uncommitted:
