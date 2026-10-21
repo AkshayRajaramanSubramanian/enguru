@@ -86,3 +86,34 @@ def write_transcript(root, project_dirname, session_id, entries, extra_bytes=b""
     data = b"".join(json.dumps(e).encode("utf-8") + b"\n" for e in entries)
     p.write_bytes(data + extra_bytes)
     return p
+
+
+def _git_for(repo, *args):
+    subprocess.run(["git", *args], cwd=str(repo), check=True,
+                   capture_output=True)
+
+
+def make_repo(tmp_path, commits, messages):
+    """Real git repo (branch main). commits: list of {path: str|bytes|None}
+    (None deletes the file); messages: one commit message per commit."""
+    r = Path(tmp_path) / "gitrepo"
+    r.mkdir()
+    _git_for(r, "init", "-b", "main")
+    _git_for(r, "config", "user.name", "Test User")
+    _git_for(r, "config", "user.email", "test@example.com")
+    _git_for(r, "config", "commit.gpgsign", "false")
+    for files, msg in zip(commits, messages):
+        for rel, content in files.items():
+            p = r / rel
+            if content is None:
+                if p.exists():
+                    p.unlink()
+                continue
+            p.parent.mkdir(parents=True, exist_ok=True)
+            if isinstance(content, bytes):
+                p.write_bytes(content)
+            else:
+                p.write_text(content, encoding="utf-8")
+        _git_for(r, "add", "-A")
+        _git_for(r, "commit", "-q", "--allow-empty", "-m", msg)
+    return r
