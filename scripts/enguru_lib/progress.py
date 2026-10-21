@@ -276,7 +276,7 @@ def _start(repo, scope, intensity, now, sid):
     prog["sessions"].append(session)
     prog["current"] = {"session_id": session["id"], "served_concepts": [],
                        "served_questions": {}, "revisit_served": [], "pending": None,
-                       "rebuilds": {}, "skipped": {}}
+                       "rebuilds": {}, "skipped": {}, "revisit_at_start": list(prog["revisit"])}
     _save(repo, prog)
     out = {"session_id": session["id"], "scope": scope.kind, "range_id": session["range_id"],
            "intensity": intensity}
@@ -504,8 +504,10 @@ def next_item(repo) -> dict:
 
 
 def _held_for_revisit(prog, cid):
-    """A queued revisit concept is only served through the capped revisit step."""
-    return cid in prog["revisit"] and cid not in prog["current"]["revisit_served"]
+    """A concept queued for revisit when the session started is only served through
+    the capped revisit step (concepts sent to revisit during the session keep their slot)."""
+    cur = prog["current"]
+    return cid in cur.get("revisit_at_start", []) and cid not in cur["revisit_served"]
 
 
 def _next_project(repo, prog, session, idx, tm, module_banks):

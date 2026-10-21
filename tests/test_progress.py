@@ -663,3 +663,22 @@ def test_fix_check_rejected_unless_recheck(tmp_path):
         progress.record(repo, rec(s["session_id"], "f1", kind="fix_check", qkind="finding",
                                   fix_verdict="fixed"))
     assert e.value.code == "state_corrupt"
+
+
+def test_quick_limit_holds_when_every_answer_is_skipped(tmp_path):
+    repo, scope, s = start_diff(tmp_path, make_bank(["c%d" % i for i in range(8)]), "quick")
+    asked = []
+    while True:
+        item = progress.next_item(repo)
+        if item["action"] == "done":
+            break
+        asked.append(item["question"]["concept_id"])
+        answer_ask(repo, s["session_id"], item, "skipped")
+    assert asked == ["c0", "c1", "c2", "c3", "c4"]
+    assert item["uncovered"] == ["c5", "c6", "c7"]
+
+
+def test_thorough_skipped_concept_gets_second_question(tmp_path):
+    repo, scope, s = start_diff(tmp_path, make_bank(["a", "b"], per_concept=3), "thorough")
+    answer_ask(repo, s["session_id"], progress.next_item(repo), "skipped")
+    assert progress.next_item(repo)["question"]["id"] == "q-a-2"
