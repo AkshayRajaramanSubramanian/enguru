@@ -308,3 +308,28 @@ def apply_verdicts(repo, bank_path) -> dict:
     data["concepts"] = [c for c in data["concepts"] if c["id"] not in drop_concepts]
     paths.atomic_write_json(Path(bank_path), data)
     return result
+
+
+# --------------------------------------------------------------------- merge
+
+def _merge_by(existing, incoming, key):
+    pos = {item.get(key): i for i, item in enumerate(existing)}
+    out = list(existing)
+    for item in incoming:
+        k = item.get(key)
+        if k in pos:
+            out[pos[k]] = item
+        else:
+            pos[k] = len(out)
+            out.append(item)
+    return out
+
+
+def merge_partial(bank_path, partial_path) -> None:
+    """Merge a bank-shaped partial: concepts and questions replace by id,
+    findings replace by concept_id; new items are appended."""
+    data = paths.read_json(bank_path)
+    part = paths.read_json(partial_path)
+    for section, key in (("concepts", "id"), ("questions", "id"), ("findings", "concept_id")):
+        data[section] = _merge_by(data.get(section, []), part.get(section) or [], key)
+    paths.atomic_write_json(Path(bank_path), data)

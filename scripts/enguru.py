@@ -62,6 +62,9 @@ def cmd_digest_prep(args):
     root = Path(args.transcripts_root) if args.transcripts_root else Path.home() / ".claude" / "projects"
     try:
         scope = digest.resolve_scope(repo, not args.diff, args.range, args.uncommitted)
+        if scope.uncommitted:
+            from enguru_lib import progress
+            scope.range_id = progress.current_worktree_range_id(repo) or scope.range_id
         emit(digest.prep(repo, scope, root))
     except digest.DigestError as e:
         fail(e.code, e.message)
@@ -134,6 +137,78 @@ def cmd_bank_apply_verdicts(args):
     emit(bank.apply_verdicts(repo, path))
 
 
+def cmd_bank_merge(args):
+    from enguru_lib import bank
+    repo = _repo_root(os.getcwd())
+    path, part = _bank_path(repo, args.path), _bank_path(repo, args.partial)
+    _load_bank_json(path)
+    _load_bank_json(part)
+    bank.merge_partial(path, part)
+    emit({"ok": True})
+
+
+def _progress_call(fn, *a):
+    from enguru_lib import digest, paths, progress
+    try:
+        return fn(*a)
+    except progress.ProgressError as e:
+        fail(e.code, e.message)
+    except digest.DigestError as e:
+        fail(e.code, e.message)
+    except paths.LockHeld as e:
+        fail("lock_held", "Another enguru session is running (%s)." % e)
+    except paths.StateCorrupt as e:
+        fail("state_corrupt", str(e))
+
+
+def _stdin_json():
+    try:
+        return json.loads(sys.stdin.read())
+    except ValueError as e:
+        fail("state_corrupt", "stdin is not valid JSON: %s" % e)
+
+
+def cmd_session_start(args):
+    from enguru_lib import digest, progress
+    repo = _repo_root(os.getcwd())
+    intensity = "quick" if args.quick else "thorough" if args.thorough else None
+    scope = _progress_call(digest.resolve_scope, repo, not args.diff, args.range, args.uncommitted)
+    emit(_progress_call(progress.start_session, repo, scope, intensity))
+
+
+def cmd_session_end(args):
+    from enguru_lib import progress
+    emit(_progress_call(progress.end_session, _repo_root(os.getcwd())))
+
+
+def cmd_session_set_intensity(args):
+    from enguru_lib import progress
+    emit(_progress_call(progress.set_intensity, _repo_root(os.getcwd()), args.intensity))
+
+
+def cmd_next(args):
+    from enguru_lib import progress
+    emit(_progress_call(progress.next_item, _repo_root(os.getcwd())))
+
+
+def cmd_record(args):
+    from enguru_lib import progress
+    rec = _stdin_json()
+    emit(_progress_call(progress.record, _repo_root(os.getcwd()), rec))
+
+
+def cmd_status(args):
+    from enguru_lib import progress
+    emit(_progress_call(progress.status, _repo_root(os.getcwd())))
+
+
+def cmd_keylog_add(args):
+    from enguru_lib import progress
+    entry = _stdin_json()
+    _progress_call(progress.keylog_add, _repo_root(os.getcwd()), entry)
+    emit({"ok": True})
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="enguru")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -163,6 +238,30 @@ def build_parser():
     av = bk.add_parser("apply-verdicts", help="apply finding-verifier verdicts")
     av.add_argument("path")
     av.set_defaults(func=cmd_bank_apply_verdicts)
+    bm = bk.add_parser("merge", help="merge a partial bank into a bank")
+    bm.add_argument("path")
+    bm.add_argument("partial")
+    bm.set_defaults(func=cmd_bank_merge)
+    se = sub.add_parser("session", help="interview sessions").add_subparsers(dest="scmd", required=True)
+    ss = se.add_parser("start", help="start a session")
+    smode = ss.add_mutually_exclusive_group(required=True)
+    smode.add_argument("--project", action="store_true")
+    smode.add_argument("--diff", action="store_true")
+    ss.add_argument("--range")
+    ss.add_argument("--uncommitted", action="store_true")
+    sint = ss.add_mutually_exclusive_group()
+    sint.add_argument("--quick", action="store_true")
+    sint.add_argument("--thorough", action="store_true")
+    ss.set_defaults(func=cmd_session_start)
+    se.add_parser("end", help="end the session").set_defaults(func=cmd_session_end)
+    si = se.add_parser("set-intensity", help="choose diff intensity")
+    si.add_argument("intensity", choices=["quick", "thorough"])
+    si.set_defaults(func=cmd_session_set_intensity)
+    sub.add_parser("next", help="next interview item").set_defaults(func=cmd_next)
+    sub.add_parser("record", help="record a result (JSON on stdin)").set_defaults(func=cmd_record)
+    sub.add_parser("status", help="progress summary").set_defaults(func=cmd_status)
+    kl = sub.add_parser("keylog", help="answer-key corrections").add_subparsers(dest="kcmd", required=True)
+    kl.add_parser("add", help="append a correction (JSON on stdin)").set_defaults(func=cmd_keylog_add)
     return p
 
 

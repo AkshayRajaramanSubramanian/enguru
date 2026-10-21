@@ -262,3 +262,24 @@ def test_cli_bank_commands(tmp_path):
     (repo / "bad.json").write_text("{nope")
     code, out = run_cli_raw(["bank", "validate", "bad.json"], repo)
     assert code == 2 and out["error"] == "state_corrupt"
+
+
+def test_merge_partial_replaces_by_id_and_adds_new(tmp_path):
+    repo = mk(tmp_path)
+    bp = repo / "bank.json"
+    paths.atomic_write_json(bp, base_bank())
+    part = copy.deepcopy(base_bank())
+    part["concepts"][0]["title"] = "New title"
+    q2 = copy.deepcopy(part["questions"][0])
+    q2["id"] = "q2"
+    part["questions"][0]["prompt"] = "replaced"
+    part["questions"].append(q2)
+    part["findings"][0]["severity"] = "critical"
+    pp = repo / "part.json"
+    paths.atomic_write_json(pp, part)
+    bank.merge_partial(bp, pp)
+    out = paths.read_json(bp)
+    assert [c["title"] for c in out["concepts"]] == ["New title"]
+    assert [(q["id"], q["prompt"]) for q in out["questions"]] == [("q1", "replaced"), ("q2", "p")]
+    assert [f["severity"] for f in out["findings"]] == ["critical"]
+    run_cli(["bank", "merge", "bank.json", "part.json"], repo)

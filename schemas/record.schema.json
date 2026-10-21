@@ -5,7 +5,8 @@
       "type": "string",
       "enum": [
         "answer",
-        "ladder_progress"
+        "ladder_progress",
+        "fix_check"
       ]
     },
     "session_id": {
@@ -86,7 +87,8 @@
       "type": [
         "integer",
         "null"
-      ]
+      ],
+      "minimum": 1
     },
     "ladder_length": {
       "type": [
@@ -129,6 +131,14 @@
     },
     "timestamp": {
       "type": "string"
+    },
+    "fix_verdict": {
+      "type": "string",
+      "enum": [
+        "fixed",
+        "still_present",
+        "uncertain"
+      ]
     }
   },
   "required": [
