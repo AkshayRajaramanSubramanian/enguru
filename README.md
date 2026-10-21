@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/brand/enguru-horizontal.svg" alt="enguru" width="360"></p>
+
 # enguru
 
 A Claude Code plugin that interviews you about your own vibe-coded project, so you
@@ -131,3 +133,7 @@ that nothing outside `.enguru/` and `.gitignore` changed. Results go to
 ## License
 
 MIT
+
+## Brand
+
+The logo, colours and usage rules are in [`assets/brand/`](assets/brand/GUIDELINES.md).
