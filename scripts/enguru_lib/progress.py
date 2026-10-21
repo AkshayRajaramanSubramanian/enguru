@@ -329,10 +329,23 @@ def end_session(repo, now=None) -> dict:
                  and a.get("question_kind") == "finding" and a.get("revealed")
                  and a.get("outcome") != "skipped"}
     if session:
+        # The session's own scope, plus findings from any bank that this session served
+        # or recorded (a ladder resumed across scopes, spec 9.5).
         tm, _, banks = _load_scope(repo, session)
-        idx = _index(tm, banks)
+        touched = set((prog["current"] or {}).get("served_concepts", []))
+        touched |= {a["concept_id"] for a in prog["answers"] if a.get("session_id") == sid}
+        all_tm, all_banks = _all_banks(repo)
+        scope_rels = {rel for rel, _ in banks}
+        extra = [(rel, dict(b, findings=[f for f in b.get("findings", [])
+                                         if f.get("concept_id") in touched]))
+                 for rel, b in all_banks if rel not in scope_rels]
+        idx = _index(tm or all_tm, banks + extra)
+        seen = set()
         for f in _confirmed(idx):
             cid = f["concept_id"]
+            if cid in seen:
+                continue
+            seen.add(cid)
             if (f.get("severity") == "critical" and cid not in explained
                     and not _finding_state(prog, cid).get("explained")
                     and _finding_state(prog, cid)["status"] in ("open", "in_progress")):

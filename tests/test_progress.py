@@ -921,3 +921,28 @@ def test_ladder_progress_moves_exactly_one_rung(tmp_path):
         progress.record(repo, rec(sid, "f1", None, "incorrect", kind="ladder_progress",
                                   qkind="finding", ladder_rung_reached=rung, ladder_length=4))
     assert load_progress(repo)["findings"]["f1"]["rung"] == 3
+
+
+def test_critical_resumed_cross_scope_and_stopped_is_still_undisclosed(tmp_path):
+    """A project-mode critical ladder resumed in a diff session (whose own bank does not hold
+    it) and stopped again is still listed as undisclosed at the end of that session."""
+    repo = diff_repo(tmp_path, {"auth.py": LINES})
+    s = progress.start_session(repo, digest.Scope("project"), None)
+    pdir = Path(repo) / ".enguru" / "banks" / "project"
+    f = finding("m1-f", "critical", rungs=4, file="auth.py")
+    write_bank(pdir / "topic-map.json",
+               {"modules": [{"id": "m1", "title": "M1", "concepts": [concept("a")]}]})
+    write_bank(pdir / "m1.json", make_bank(["a"], [f], scope_key="project"))
+    assert progress.next_item(repo)["rung"] == 1
+    progress.record(repo, rec(s["session_id"], "m1-f", None, "incorrect", kind="ladder_progress",
+                              qkind="finding", ladder_rung_reached=2, ladder_length=4,
+                              scope="project"))
+    progress.end_session(repo)
+    s2 = progress.start_session(repo, diff_scope(repo), "quick")
+    item = progress.next_item(repo)
+    assert item["action"] == "ladder" and item["concept_id"] == "m1-f" and item["rung"] == 2
+    progress.record(repo, rec(s2["session_id"], "m1-f", None, "incorrect", kind="ladder_progress",
+                              qkind="finding", ladder_rung_reached=3, ladder_length=4))
+    out = progress.end_session(repo)
+    assert out["undisclosed_critical"] == [
+        {"concept_id": "m1-f", "title": "Title m1-f", "file": "auth.py"}]
