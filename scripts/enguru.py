@@ -76,6 +76,64 @@ def cmd_digest_merge(args):
         fail(e.code, e.message)
 
 
+def _bank_path(repo, raw):
+    p = Path(raw)
+    return p if p.is_absolute() else repo / p
+
+
+def _load_bank_json(path):
+    from enguru_lib import paths
+    try:
+        return paths.read_json(path)
+    except FileNotFoundError:
+        fail("state_corrupt", "file not found: %s" % path)
+    except (paths.StateCorrupt, OSError, ValueError) as e:
+        fail("state_corrupt", str(e))
+
+
+def cmd_bank_validate(args):
+    from enguru_lib import bank, paths
+    repo = _repo_root(os.getcwd())
+    path = _bank_path(repo, args.path)
+    data = _load_bank_json(path)
+    digest = {"events": []}
+    dp = repo / ".enguru" / "digest.json"
+    if dp.exists():
+        try:
+            digest = paths.read_json(dp)
+        except (paths.StateCorrupt, OSError, ValueError):
+            digest = {"events": []}
+    problems = bank.validate_bank(repo, data, digest)
+    emit({"ok": not problems, "problems": problems})
+
+
+def cmd_bank_seal(args):
+    from enguru_lib import bank
+    repo = _repo_root(os.getcwd())
+    path = _bank_path(repo, args.path)
+    _load_bank_json(path)
+    bank.seal(repo, path)
+    emit({"ok": True})
+
+
+def cmd_bank_drop(args):
+    from enguru_lib import bank
+    repo = _repo_root(os.getcwd())
+    path = _bank_path(repo, args.path)
+    _load_bank_json(path)
+    ids = [i for i in args.ids.split(",") if i]
+    bank.drop_items(path, ids)
+    emit({"ok": True, "dropped": ids})
+
+
+def cmd_bank_apply_verdicts(args):
+    from enguru_lib import bank
+    repo = _repo_root(os.getcwd())
+    path = _bank_path(repo, args.path)
+    _load_bank_json(path)
+    emit(bank.apply_verdicts(repo, path))
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="enguru")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -91,6 +149,20 @@ def build_parser():
     pp.set_defaults(func=cmd_digest_prep)
     mg = dg.add_parser("merge", help="merge extractor output and rule events into the digest")
     mg.set_defaults(func=cmd_digest_merge)
+    bk = sub.add_parser("bank", help="question bank commands").add_subparsers(dest="bcmd", required=True)
+    v = bk.add_parser("validate", help="validate a bank or topic map")
+    v.add_argument("path")
+    v.set_defaults(func=cmd_bank_validate)
+    sl = bk.add_parser("seal", help="store evidence hashes")
+    sl.add_argument("path")
+    sl.set_defaults(func=cmd_bank_seal)
+    dr = bk.add_parser("drop", help="drop questions or concepts by id")
+    dr.add_argument("path")
+    dr.add_argument("--ids", required=True)
+    dr.set_defaults(func=cmd_bank_drop)
+    av = bk.add_parser("apply-verdicts", help="apply finding-verifier verdicts")
+    av.add_argument("path")
+    av.set_defaults(func=cmd_bank_apply_verdicts)
     return p
 
 
