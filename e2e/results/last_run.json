@@ -3,7 +3,7 @@
  "assertions": {
   "a_followups_le_3": {
    "pass": true,
-   "detail": "22 answer records (all attempts), 0 with followups_used > 3",
+   "detail": "24 answer records (all attempts), 0 with followups_used > 3",
    "component": null
   },
   "b_no_early_reveal": {
@@ -26,13 +26,13 @@
    "detail": {
     "recomputed": {
      "comprehension": "not_yet_rated",
-     "review_judgment": "not_yet_rated",
+     "review_judgment": "novice",
      "defect_detection": "novice",
      "systems_thinking": "not_yet_rated"
     },
     "certificate": {
      "comprehension": "not_yet_rated",
-     "review_judgment": "not_yet_rated",
+     "review_judgment": "novice",
      "defect_detection": "novice",
      "systems_thinking": "not_yet_rated"
     },
@@ -66,20 +66,20 @@
     "session1_stopped_by": "persona_stop_mid_ladder",
     "modules": [
      "auth",
+     "data",
      "notes",
      "tags",
-     "data",
      "app"
     ]
    }
   ],
-  "minutes": 16.7,
+  "minutes": 21.6,
   "sessions": [
    {
     "name": "project",
     "command": "/enguru:interview",
-    "claude_session": "7139601b-7990-4668-82cd-2933f802b03f",
-    "enguru_session": "s1-7a2d06",
+    "claude_session": "627f56e5-31a9-4228-921a-44f7e44be731",
+    "enguru_session": "s1-8bfc38",
     "turns": 4,
     "turn_ok": [
      true,
@@ -90,20 +90,24 @@
     "stopped_by": "persona_stop_mid_ladder",
     "ended": true,
     "students": [
-     "It comes from `requireUser` in `src/auth.js`. It reads the Bearer token, joins `sessions` to `users`, and sets `req.user` to that row. The routes then use `req.user.id` for things like `owner_id` on new notes. The `X-Act-As-User` header just swaps the id so support can see what a user sees. You still need a valid token to use it and our client never sends it, so I think it's fine.",
-     "A caller who isn't our client would still need a valid Bearer token, and only support knows the header exists. So the only real worry is support forgetting about it, or someone stealing a token. A token is tied to one user, and `requireUser` rejects anything missing, unknown or expired, so I'm confident the header can't cause trouble on its own.",
+     "It's `req.user.id`, which `requireUser` sets after it joins the session token to the users table. Notes use it for `owner_id` on create and for the ownership check in `loadOwnNote`, and tags use it for the `GET /tags` count. So everything is scoped to the logged-in user, because you can't get past `requireUser` without a valid token.",
+     "Pretty airtight, I think. The tokens are random 32-byte values, so nobody can guess one, and they expire after 7 days. The main risk is someone stealing a real token, like off an unencrypted connection, and then they'd be that user until it expires or I delete the session row. The `X-Act-As-User` header isn't a worry, since you still need a valid token to use it and only support knows about it.",
      "stop"
     ],
-    "end_text": "Session ended.\n\n- **Solid:** Nothing yet. We only got through one question.\n- **To revisit:** Nothing is queued.\n- **Takeaway:** The most important next step is to finish the real issue below.\n- **Open issue:** A real critical issue remains in **Support act-as header** (`src/auth.js`). I'm not explaining it here so you can work it out yourself. Run `/enguru:interview` again to continue.",
+    "end_text": "Session ended. Nothing was scored this time, so there's no certificate to suggest.\n\n- **Solid:** none yet.\n- **To revisit:** none queued.\n- **Takeaway:** The most important next step is to finish the real issue below.\n\nA real critical issue remains in **Support act-as-user header** (`src/auth.js`). I'm not explaining it here so you can work it out yourself; run `/enguru:interview` again to continue.",
     "errored_tool_calls": []
    },
    {
     "name": "diff-quick",
     "command": "/enguru:interview --diff --quick",
-    "claude_session": "14f0ff9e-4700-4cc5-a4c0-3d733dc13911",
-    "enguru_session": "s2-70a13f",
-    "turns": 18,
+    "claude_session": "34e6e817-ee60-493e-825e-3d74d8e0b683",
+    "enguru_session": "s2-554226",
+    "turns": 22,
     "turn_ok": [
+     true,
+     true,
+     true,
+     true,
      true,
      true,
      true,
@@ -126,32 +130,36 @@
     "stopped_by": null,
     "ended": true,
     "students": [
-     "Yes, I think so. `requireUser` joins the token in `sessions` to `users` and sets `req.user` from that row, and it 401s on a missing, unknown or expired token. The `X-Act-As-User` header only swaps the id after that, and you still need a valid token to use it. The app's own client never sends it, so the only worry is support forgetting to remove it someday.",
-     "Only support is supposed to send it. The code checks that the token is valid before it looks at the header, so you can't use it without being logged in. The app's own client never sends it and nobody else knows it exists, so I'm not worried about who can set it.",
-     "Walking through it: `requireUser` looks up the token and returns 401 if it's missing or expired. Then line 37 sees the header and sets `req.user.id` to that id. I think the handlers' ownership checks still protect the data, because the token was already verified as a real logged-in user and the 404s in `loadOwnNote` and the `PUT` route would still stop anything that isn't theirs. So the header only changes what support sees, and the only real risk is support forgetting to remove it.",
-     "It's `req.user.id`. `requireUser` sets it from the session token's user, so every route treats that as the logged-in person. The header is only for support to see what a user sees, and you still need a valid token to use it, so I don't see a real issue there.",
-     "If something other than the session changed `req.user.id`, it would be a stolen token. Someone with a valid token would get in as that user, and that's the main risk. The `X-Act-As-User` header is only for support and you still need a valid token to use it, so the only thing I'd worry about is support forgetting to turn it off later.",
-     "Lines 35-37 just take the user id from the sessions-to-users join and put it on `req.user`. The `X-Act-As-User` header then swaps in the id for support, but you still need a valid token for `requireUser` to get that far. So the session row is the real input, and the header is a support-only convenience that the app's own client never sends. I still think the only realistic risk is a stolen token, or support leaving the feature in by mistake.",
-     "The check is the token check in `requireUser`. The header is only read after the token has been looked up and found valid, so a random person can't use it. There's no separate role check or log entry, because only support knows about the header and the app's client never sends it. I think that's enough.",
-     "Honestly, the main risk is that support forgets to take the header out someday, or that someone steals a token. But a stolen token is a problem with or without the header, and the header only works with a valid token anyway. Our client never sends it, so I think it's safe as it is.",
-     "1. It'd be Bob's id, since that's what the header does. 2. The list query would return Bob's notes, which is exactly what support needs to see what a user sees. Alice would have to know the header exists and also know Bob's id, and our client never sends either, so I still think it's fine as long as support doesn't forget to remove it.",
-     "All of them are protected by `router.use(requireUser)` at the top of the notes router, so you need a valid token for every note route. GET `/:id` and DELETE `/:id` also go through `loadOwnNote`, which returns 404 if the note is missing or isn't yours. PUT `/:id` is covered by the same `requireUser`, and it returns 404 when `info.changes === 0`, so another user's note can't be changed through it.",
-     "DELETE calls `loadOwnNote` first, so it 404s before it ever touches the database if the note is missing or not yours. PUT skips that and goes straight to the `UPDATE`, but it's still behind `router.use(requireUser)`, so you need a valid token. The `info.changes === 0` check then returns 404 if nothing was updated. I think the only real risk there is two edits racing each other, or `COALESCE` wiping a field.",
-     "I don't think anything goes wrong on the ownership side. `router.use(requireUser)` already covers every route in the notes router, so PUT only works with a valid logged-in user, and `info.changes === 0` returns 404 if the note isn't updated. `loadOwnNote` mostly gives a clean 404 up front. The real risks are two edits racing each other, or `COALESCE` wiping a field if someone leaves it out of the body.",
-     "The `WHERE` is just `id = ?`, so it only updates the one note with that id. Ownership is already handled because `requireUser` runs on the whole router, so only a logged-in user gets that far. If the id doesn't match anything, `info.changes` is 0 and it returns 404. I still think the real risks are the racing edits and `COALESCE`.",
-     "It matches one row, note 7, since the `WHERE` is only `id = ?`. So `info.changes` is 1, B gets a 200 with the updated note, and the title becomes \"pwned\". That surprises me, because `requireUser` means B is a legitimate logged-in user and I'd expect the 404 path. I'd still say the real problems are racing edits and `COALESCE`.",
-     "Honestly I think the problem is the way the handler writes: `COALESCE` and two edits racing. If two requests land together, the last write wins and a field can get wiped, so someone could overwrite a note's content that way. I'd fix it by reading the row and updating it inside one better-sqlite3 transaction, and only setting the fields that were actually sent. B getting through was a one-off to me, since `requireUser` already makes sure only logged-in users can reach this route.",
-     "The bug is that it selects `owner_id` but never compares it to `req.user.id`. Any logged-in user can add tags to someone else's note just by knowing the id, and they can tell the note exists because they get a 201 instead of a 404. The fix is to change the check to `if (!note || note.owner_id !== req.user.id) return res.status(404).json({ error: 'not_found' });`. That's what I asked the agent for originally, so the check must have been dropped in a later edit.",
-     "The composite primary key `(note_id, name)` means a note can't have the same tag twice. `INSERT OR IGNORE` turns a repeat add into a harmless no-op instead of a constraint error, so the route still returns 201. `owner_id` is stored on each tag row so `GET /tags` can filter on `owner_id = req.user.id` without joining to `notes`. The result is a count per tag name of only your own tags, so other users' tags never show up in your totals."
+     "It comes from the token: I look up the Bearer token in `sessions`, join to `users`, and set `req.user` from that row. If an `X-Act-As-User` header is present, `req.user.id` gets replaced with the id in the header. So the inputs are the token and that optional header. It's fine because you still need a valid token to get that far, and only support knows about the header.",
+     "Honestly I think the only thing that could go wrong is support forgetting to take the header out later, or someone stealing a token. Without a valid token the request gets a 401 before the header is even read, and the app's own client never sends `X-Act-As-User`. So I'm confident it's safe as it is.",
+     "The check is the token lookup right above it: if the token is missing, unknown or expired, `requireUser` returns 401 before it ever reads the header. So only someone with a valid session can get that far, and in practice that's support, since they're the only ones who know about `X-Act-As-User`. I don't see anything else that needs to be there.",
+     "Following it through: the token lookup passes because Alice's token is valid, then the header is read and `req.user.id` becomes Bob's id, so the list query runs for Bob and returns his notes. That's the support feature working as I built it. Alice would never send that header, though, since only support knows about it and the app's client doesn't use it.",
+     "Honestly, nothing in the code stops Alice from sending it, but she'd need a valid token first, and only support knows the header exists. So I don't think it's a real vulnerability. It's a support convenience, and the only risk I see is support forgetting to take it out later or someone stealing a token. An ordinary user can't do anything with it unless they somehow find out about it.",
+     "It's built in `requireUser` in `src/auth.js`, and the tag routes just use `req.user` from it. The inputs are the Bearer token, which gets looked up in `sessions` and joined to `users`, plus the optional `X-Act-As-User` header, which swaps in that user id for support. The token check is what protects the tag routes, and the header is only a support convenience. The `POST /notes/:id/tags` owner check on top of that means tags are safe too.",
+     "It compares the note's `owner_id` from the database against `req.user.id`, and `req.user` comes from `requireUser`, which resolves it from the session token. So it's always the logged-in user's id, and anyone else's note gets a 404. The `X-Act-As-User` header is only for support and you still need a valid token, so I don't see a way around that check.",
+     "The other input is the `X-Act-As-User` header, since it's a request header. But in practice only support sends it, and the app's own client never does. You still need a valid token for it to do anything, so I think the only risk is support forgetting to remove it later.",
+     "Support decides the value, since they're the only ones who send it, and it needs a valid token anyway. The worst case I see is support typing the wrong user id by mistake, or someone forgetting to remove the header later. The owner check still compares against `req.user.id`, so I'm confident normal users can only touch their own notes.",
+     "Between reading the header and setting `req.user.id` I don't think there's a role check or logging, it's just the assignment. But the token check right above it already makes sure the caller is logged in, and only support knows about the header, so I don't see that as a hole. The real risk is still a support person typing the wrong id.",
+     "I'm not sure which request of Alice's you mean, so can you point me to it? If she's sending `X-Act-As-User`, she still needs a valid token to get past `requireUser`, and only support knows about the header. I still think the only real risk is support typing the wrong id.",
+     "At step 5 `req.user.id` is Bob's id, because `requireUser` swaps it in when it reads the header. So the owner check passes and the tag gets added to Bob's note. That's what the header is meant to do for support. Alice wouldn't normally know about it, so I still think the only real risk is support typing the wrong id.",
+     "It's a bug in a support feature, not a security hole, I think. Alice only got in because she knew about a header that only support is supposed to know about, and the app's client never sends it. Normal users can't really do anything with it. The real risk is support typing the wrong id, or someone stealing a token.",
+     "GET and DELETE go through `loadOwnNote`, which returns 404 if the note isn't yours. PUT does the update directly, but the whole router sits behind `router.use(requireUser)`, so it only touches the logged-in user's notes. The 404 when `info.changes === 0` covers the case where the note doesn't exist or isn't theirs. It's just a different style, not a real gap, and the only thing I'd watch is two edits racing each other.",
+     "The `WHERE` filters on the note `id`, and that's all it needs. `requireUser` already guarantees the caller is logged in, so they can only be editing their own notes, and the `info.changes === 0` 404 covers the missing case. The only real risk I see is two edits landing at once and the last one winning.",
+     "It matches on `id = 7`, but B is logged in as B, so `requireUser` scopes the request to B's notes. `info.changes` comes back 0, B gets the 404, and A's note stays untouched. That's exactly what the `changes === 0` check is for. The only thing I'd worry about is A and B editing at the same moment, where the last write wins.",
+     "I see the `WHERE` only has `id`, but `router.use(requireUser)` runs before every route in that router, so the request is already B's by the time it reaches the `UPDATE`. That's why I'm confident the `changes === 0` check returns the 404 for a note that isn't B's. I still think the only real risk is two people editing at once and the last write winning.",
+     "The bug is on the `if (!note)` line. It selects `owner_id` but never compares it to `req.user.id`, so anyone logged in can add tags to someone else's note, and the 201 vs 404 also tells them the note exists. The fix is `if (!note || note.owner_id !== req.user.id)` so it returns the same 404 for missing and not-yours.",
+     "The primary key on `(note_id, name)` means a note can't have the same tag twice, and the cascade deletes a note's tags when the note is deleted, so nothing is left orphaned. `INSERT OR IGNORE` makes adding a tag a second time harmless instead of a 500. What I'd question is that `owner_id` on `tags` duplicates `notes.owner_id`, so the two could drift apart. There's also no index on `owner_id` for the `GET /tags` count, and `OR IGNORE` can hide other constraint failures, so the route would still return 201 when nothing was inserted.",
+     "Yes, I turn on `PRAGMA foreign_keys = ON` in `src/db.js` next to the WAL setting, so the cascade does run. I'd still check it's on the same connection the routes use. An unauthenticated `GET /nonexistent` gets a 401, not a 404, because the tags router is mounted at `/` and its `router.use(requireUser)` runs for any path that reaches it, before Express would fall through to the 404. Order matters because anything mounted after the tags router is behind auth, so `POST /login` has to be registered before it or nobody could log in.",
+     "I'd want tests for the tag name rules first: upper-case gets lower-cased, and anything outside `^[a-z0-9-]{1,32}$` or longer than 32 characters gets rejected, so bad names can't get in. Next is the ownership check, where user B posting a tag to user A's note must get 404 and write nothing. Then adding the same tag twice should leave one row, which guards the `INSERT OR IGNORE` and primary key behaviour. I'd also test that deleting a note removes its tags, which guards `PRAGMA foreign_keys = ON` being lost. Last, `GET /tags` should count only my own tags, and an unauthenticated request should get 401, so a mount-order change doesn't expose anything."
     ],
-    "end_text": "## Session summary\n\n**Solid**\n- **Tag ownership check:** you spotted the missing owner comparison and the 201-versus-404 leak.\n- **Tags schema:** you explained the composite key, `INSERT OR IGNORE` and `owner_id` correctly, including how `GET /tags` counts.\n\n**To revisit** (queued for next time)\n- **Acting as another user via the `X-Act-As-User` header** (`src/auth.js`): this is two entries, one from earlier and one in this diff.\n- **`PUT /notes/:id` with no ownership check** (`src/routes/notes.js`).\n\n**Takeaway:** a valid token only shows who is logged in. It doesn't show that the identity or the data belongs to them. Every route that reads or writes by id needs its own ownership check against the verified user.",
+    "end_text": "## Session summary\n\n**Solid**\n- Tag ownership check (`diff-tags-owner-1`)\n- Tags table design: key, cascade and `INSERT OR IGNORE` (`diff-tags-schema-1`)\n- Router mount order and the unauthenticated 401 (`diff-tags-mount-1`)\n- Test coverage for the tag change (`diff-tags-untested-1`)\n\n**To revisit** (all three are real issues, and I explained each one in full this session)\n- `auth-act-as-1` and `diff-tags-auth-1`: `requireUser` in `src/auth.js` trusts the client's `X-Act-As-User` header with no role check.\n- `diff-notes-put-1`: `PUT /notes/:id` in `src/routes/notes.js` has no ownership check.\n\n**Takeaway:** Authentication isn't authorization. A valid token only proves the caller is logged in, so each route has to check ownership. Never take identity from something the client controls.\n\nYou have enough new evidence for an updated certificate: run `/enguru:certificate`.",
     "errored_tool_calls": []
    },
    {
     "name": "diff-thorough",
     "command": "/enguru:interview --diff --thorough",
-    "claude_session": "067636bb-2301-45e9-9890-1405a7b74359",
-    "enguru_session": "s3-2a9062",
+    "claude_session": "5b88bacb-f696-499b-8a0b-b30416fc1023",
+    "enguru_session": "s3-cc2bfd",
     "turns": 15,
     "turn_ok": [
      true,
@@ -173,22 +181,22 @@
     "stopped_by": null,
     "ended": true,
     "students": [
-     "They all use `req.user.id`. `requireUser` looks up the bearer token in `sessions`, joins to `users`, and sets `req.user`, so `req.user.id` is the logged-in user. The routes use it for things like `owner_id` on new notes.",
-     "The main risk is a stolen token, since whoever has it is that user until the session expires or I delete the row. There's also the `X-Act-As-User` header that swaps `req.user.id`, but that's harmless because you still need a valid token to use it and only support knows about it. The only thing I'd worry about there is support forgetting to remove it later.",
-     "After it looks up the session and sets `req.user`, it checks for the `X-Act-As-User` header. If the header is there, it overwrites `req.user.id` with the id from the header, so the rest of the routes see that user's id. I still think it's harmless: you need a valid Bearer token to get that far, the app's own client never sends the header, and only support knows it exists.",
-     "The first one is enforced by the code, since `requireUser` returns 401 without a valid token. The other two are just habit, I'll admit: nothing in the code stops a client from sending the header. But I still think it's fine, because the person sending it has to be logged in, and the only real risk is support forgetting to take it out later.",
-     "I read through it and the header is applied right after the session lookup, with no role, flag or allowlist around it. I don't think that matters, though. The request already passed the token check, and the header is an internal support thing. The thing I'd really worry about is someone stealing a token, and that's the same risk any session has.",
-     "A stolen token gives an attacker that user's account, and a normal user's own token gives them their own account, and the header doesn't change that. The app's client never sends it, so regular users never touch it. What follows from no check on the sender is just that support doesn't need a special login, which is the point of it. The real risk is still someone getting hold of a token, and the 7-day expiry and deleting the session row cover that.",
-     "The header only changes `req.user.id` after the token has already been checked, so you still need a valid token to get that far. The ownership check just compares against whatever id it's given, and `requireUser` on the router means each request only touches the logged-in user's data. The header is there so support can see what a user sees, and regular users don't send it. The real risk is still a stolen token, not a normal user with their own.",
-     "`router.use(requireUser)` covers every notes route, so you need a valid token for all of them. `GET /:id` and `DELETE /:id` also go through `loadOwnNote`, which returns 404 if the note is missing or isn't yours. `POST /` sets `owner_id` from `req.user.id`, and `PUT /:id` is covered by `requireUser` too, with a 404 when `info.changes === 0`, so nobody can edit someone else's note.",
-     "The token check means only logged-in users can reach PUT, and the 404 on `info.changes === 0` covers a note that doesn't exist, so I think it's safe. The only thing I'd worry about is two edits landing at the same time and the later one overwriting the earlier one. Also, if a field is left out, `COALESCE` might wipe it, but that's about data loss, not someone else's note.",
-     "DELETE runs `loadOwnNote` first, so it looks the note up and 404s if it's missing or not the user's. PUT skips that and goes straight to the UPDATE, but I don't think that matters, because `requireUser` already ran for the whole router and the `info.changes === 0` 404 covers a missing note. It's just a shorter path to the same result.",
-     "I think the UPDATE does the same job. `loadOwnNote` checks that the note exists, and the `info.changes === 0` 404 covers that for PUT. Since `requireUser` already ran, the caller is a logged-in user, so they're only editing their own notes. What follows is that PUT is just a leaner version of DELETE, and the only real risk is someone stealing a token.",
-     "The WHERE is just `id = ?`, so the only column restricting the rows is the note id. It doesn't mention `req.user.id`, but it doesn't need to, because `requireUser` already ran and the `info.changes === 0` 404 covers a bad id. The only real risk I can see is someone stealing a token and editing with it.",
-     "It changes just the one row with that id, so one note. Since `requireUser` already ran, that's the caller's note, and if the id doesn't exist `info.changes` is 0 and we send the 404. The only thing I'd still worry about is two edits racing on the same note, where the last one wins.",
-     "The UPDATE looks for note 7, but B's token means `requireUser` has set `req.user` to B, so it's B's request and not A's note. `info.changes` comes back 0, B gets the 404, and A's note stays exactly as it was. That 404 is the protection: another user's note can't be changed through this route."
+     "It's built in `requireUser` in `src/auth.js`. It reads the Bearer token from the `Authorization` header, joins `sessions` to `users`, and sets `req.user`. The tag routes just use that. The `X-Act-As-User` header also swaps in a user id, but you still need a valid token for it, and only support knows about it, so it's harmless. The tag routes are safe because `requireUser` runs before every write.",
+     "The worst I can see is support forgetting to take the header out later, so it stays in the code when it shouldn't. Otherwise it's safe. You still need a valid token to use it, only support knows it exists, and our own client never sends it. So I don't think anyone else can do anything with it.",
+     "Just the `Authorization` header and the `X-Act-As-User` header, since those are the only two `requireUser` reads. The client could send any user id in that second one, but it's only meant for support and our own client never sends it. You still need a valid token first, so I don't see it as a real risk.",
+     "It sets `req.user.id` to that id, so the request sees that user's notes, which is exactly what support needs. But the client would need a valid token first, and nobody outside support knows the header exists. So I think the only thing to worry about is support forgetting to take it out later.",
+     "No, it just reads the header and sets `req.user.id`, and there's no logging either. I don't think it needs more, because the request already passed the token check and the app's own client never sends that header. The only thing I'd still worry about is support forgetting to remove it later.",
+     "The code only requires a valid, unexpired token plus a user id in the header. I still think that's safe, because only support knows the header exists and our client never sends it. The real risk is support forgetting to take it out later, so I'd just add a reminder to remove it before launch.",
+     "An ordinary user wouldn't know the header exists, so it wouldn't come up. And if they did send it, they'd still be going through `requireUser`, so the ownership checks in `loadOwnNote` and the tags route would still run and protect the notes. The only real risk is support forgetting to remove it, so I'd keep the reminder to take it out before launch.",
+     "`GET /:id` and `DELETE /:id` both call `loadOwnNote`, which returns 404 if the note is missing or belongs to someone else. `POST /` sets `owner_id` from `req.user.id`, so new notes are always yours. `PUT /:id` doesn't need its own lookup because the router already runs `requireUser`, and it returns 404 when `info.changes === 0`, so another user's note can't be changed. All three end up protected the same way, just by different routes.",
+     "It means the UPDATE matched no rows, so the note doesn't exist and the route returns 404. It doesn't say anything directly about ownership, but it doesn't have to. `requireUser` already ran on the whole router, so only a logged-in user can reach `PUT`, and they can only ever change their own data. I'm confident `PUT` is protected.",
+     "That's `PUT /notes/:id`. It skips `loadOwnNote` and runs the `UPDATE` straight on the note id, then returns 404 if `info.changes === 0`. I still think that's fine, because `requireUser` runs on the whole router, so only a logged-in user can get there and they can only change their own data.",
+     "The `WHERE id = ?` plus the `info.changes === 0` check. If the note wasn't the user's, nothing would change and they'd get the 404. And since `requireUser` runs on the whole router, nobody can reach that `UPDATE` without a valid login, so I'm confident it only touches their own notes.",
+     "It filters on `id`, the note's id. But the router is behind `requireUser`, so only a logged-in user gets there, and the `info.changes === 0` check returns 404 when nothing matches. I'm still confident it only touches that user's notes.",
+     "It wouldn't match for B. B is logged in, so `requireUser` lets them through, but note 7 isn't theirs, so `info.changes` comes out as 0 and B gets the 404. That's what the check is for. The only real risk I see is two edits racing each other.",
+     "I think it finds no row for B, so `info.changes` is 0 and B gets the 404. `requireUser` on the whole router means B can only ever touch B's own data, and that 404 is the proof. The only thing I'd still worry about is two edits landing at the same time."
     ],
-    "end_text": "The session is over. You didn't show a solid grasp of any concept this time, and all of the time went on the two real issues.\n\n**Solid:** none.\n\n**To revisit** (queued for next time):\n- `auth-act-as-1`\n- `diff-act-as-1`: `X-Act-As-User` in `src/auth.js`, lines 35\u201337\n- `diff-notes-put-1`: `PUT /notes/:id` in `src/routes/notes.js`, lines 43\u201350\n\n**Takeaway:** Authentication isn't authorization. A login check proves who the caller is. It doesn't prove the caller may act on a particular row or as a particular user. And `info.changes` counts matched rows, so it can't stand in for an ownership check.\n\n**Both issues are real and still open in your code.** Both come down to a missing ownership check:\n- Any logged-in user can send `X-Act-As-User` and become another user.\n- Any logged-in user can overwrite another user's note with `PUT /notes/:id`.\n\nFix both before shipping. The fixes are in the explanations above.\n\nYou have enough new evidence for an updated certificate: run `/enguru:certificate`.",
+    "end_text": "The session is over. It covered the two real issues that came back from your revisit queue. You didn't name either one this time, so I explained both and both are queued to come back.\n\n- **Solid:** Nothing yet.\n- **To revisit:** `auth-act-as-1`, `diff-tags-auth-1` (the `X-Act-As-User` override in `src/auth.js:35-37`) and `diff-notes-put-1` (the `PUT` route in `src/routes/notes.js:43-50`). The two real issues are fixable in a few lines each, and neither is fixed yet.\n- **Takeaway:** In both cases the code never checked that the caller owns the data. It relied on the caller being logged in (and, for the header, on nobody knowing it exists). A success or 404 response isn't proof of ownership; only a check against `req.user.id` is.\n- **Certificate:** You have enough new evidence for an updated certificate: run `/enguru:certificate`.",
     "errored_tool_calls": []
    }
   ],
@@ -198,7 +206,7 @@
    "lines": {
     "file": "src/auth.js",
     "start": 35,
-    "end": 37
+    "end": 38
    },
    "bank": ".enguru/banks/project/auth.json"
   },
@@ -211,7 +219,7 @@
   "matches_planted": true,
   "confirmed_findings": [
    {
-    "concept_id": "diff-act-as-1",
+    "concept_id": "diff-tags-auth-1",
     "severity": "critical",
     "lines": {
      "file": "src/auth.js",
@@ -236,14 +244,14 @@
     "lines": {
      "file": "src/auth.js",
      "start": 35,
-     "end": 37
+     "end": 38
     },
     "bank": ".enguru/banks/project/auth.json"
    }
   ],
   "answers": [
    {
-    "session_id": "s1-7a2d06",
+    "session_id": "s1-8bfc38",
     "kind": "ladder_progress",
     "concept_id": "auth-act-as-1",
     "question_kind": "finding",
@@ -256,7 +264,7 @@
     "revealed": null
    },
    {
-    "session_id": "s2-70a13f",
+    "session_id": "s2-554226",
     "kind": "ladder_progress",
     "concept_id": "auth-act-as-1",
     "question_kind": "finding",
@@ -269,7 +277,7 @@
     "revealed": null
    },
    {
-    "session_id": "s2-70a13f",
+    "session_id": "s2-554226",
     "kind": "ladder_progress",
     "concept_id": "auth-act-as-1",
     "question_kind": "finding",
@@ -282,7 +290,7 @@
     "revealed": null
    },
    {
-    "session_id": "s2-70a13f",
+    "session_id": "s2-554226",
     "kind": "answer",
     "concept_id": "auth-act-as-1",
     "question_kind": "finding",
@@ -295,9 +303,9 @@
     "revealed": true
    },
    {
-    "session_id": "s2-70a13f",
+    "session_id": "s2-554226",
     "kind": "ladder_progress",
-    "concept_id": "diff-act-as-1",
+    "concept_id": "diff-tags-auth-1",
     "question_kind": "finding",
     "style": null,
     "outcome": null,
@@ -308,9 +316,9 @@
     "revealed": null
    },
    {
-    "session_id": "s2-70a13f",
+    "session_id": "s2-554226",
     "kind": "ladder_progress",
-    "concept_id": "diff-act-as-1",
+    "concept_id": "diff-tags-auth-1",
     "question_kind": "finding",
     "style": null,
     "outcome": null,
@@ -321,9 +329,9 @@
     "revealed": null
    },
    {
-    "session_id": "s2-70a13f",
+    "session_id": "s2-554226",
     "kind": "ladder_progress",
-    "concept_id": "diff-act-as-1",
+    "concept_id": "diff-tags-auth-1",
     "question_kind": "finding",
     "style": null,
     "outcome": null,
@@ -334,9 +342,9 @@
     "revealed": null
    },
    {
-    "session_id": "s2-70a13f",
+    "session_id": "s2-554226",
     "kind": "answer",
-    "concept_id": "diff-act-as-1",
+    "concept_id": "diff-tags-auth-1",
     "question_kind": "finding",
     "style": "review_diff",
     "outcome": "dont_know",
@@ -347,7 +355,7 @@
     "revealed": true
    },
    {
-    "session_id": "s2-70a13f",
+    "session_id": "s2-554226",
     "kind": "ladder_progress",
     "concept_id": "diff-notes-put-1",
     "question_kind": "finding",
@@ -360,7 +368,7 @@
     "revealed": null
    },
    {
-    "session_id": "s2-70a13f",
+    "session_id": "s2-554226",
     "kind": "ladder_progress",
     "concept_id": "diff-notes-put-1",
     "question_kind": "finding",
@@ -373,7 +381,7 @@
     "revealed": null
    },
    {
-    "session_id": "s2-70a13f",
+    "session_id": "s2-554226",
     "kind": "ladder_progress",
     "concept_id": "diff-notes-put-1",
     "question_kind": "finding",
@@ -386,7 +394,7 @@
     "revealed": null
    },
    {
-    "session_id": "s2-70a13f",
+    "session_id": "s2-554226",
     "kind": "answer",
     "concept_id": "diff-notes-put-1",
     "question_kind": "finding",
@@ -399,7 +407,7 @@
     "revealed": true
    },
    {
-    "session_id": "s2-70a13f",
+    "session_id": "s2-554226",
     "kind": "answer",
     "concept_id": "diff-tags-owner-1",
     "question_kind": "quiz",
@@ -412,9 +420,35 @@
     "revealed": null
    },
    {
-    "session_id": "s2-70a13f",
+    "session_id": "s2-554226",
     "kind": "answer",
     "concept_id": "diff-tags-schema-1",
+    "question_kind": "quiz",
+    "style": "review_diff",
+    "outcome": "correct",
+    "followups_used": 0,
+    "hints_used": 0,
+    "ladder_rung_reached": null,
+    "ladder_length": null,
+    "revealed": null
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "answer",
+    "concept_id": "diff-tags-mount-1",
+    "question_kind": "quiz",
+    "style": "what_if",
+    "outcome": "correct",
+    "followups_used": 0,
+    "hints_used": 0,
+    "ladder_rung_reached": null,
+    "ladder_length": null,
+    "revealed": null
+   },
+   {
+    "session_id": "s2-554226",
+    "kind": "answer",
+    "concept_id": "diff-tags-untested-1",
     "question_kind": "quiz",
     "style": "explain_it",
     "outcome": "correct",
@@ -425,9 +459,9 @@
     "revealed": null
    },
    {
-    "session_id": "s3-2a9062",
+    "session_id": "s3-cc2bfd",
     "kind": "ladder_progress",
-    "concept_id": "diff-act-as-1",
+    "concept_id": "diff-tags-auth-1",
     "question_kind": "finding",
     "style": null,
     "outcome": null,
@@ -438,9 +472,9 @@
     "revealed": null
    },
    {
-    "session_id": "s3-2a9062",
+    "session_id": "s3-cc2bfd",
     "kind": "ladder_progress",
-    "concept_id": "diff-act-as-1",
+    "concept_id": "diff-tags-auth-1",
     "question_kind": "finding",
     "style": null,
     "outcome": null,
@@ -451,9 +485,9 @@
     "revealed": null
    },
    {
-    "session_id": "s3-2a9062",
+    "session_id": "s3-cc2bfd",
     "kind": "ladder_progress",
-    "concept_id": "diff-act-as-1",
+    "concept_id": "diff-tags-auth-1",
     "question_kind": "finding",
     "style": null,
     "outcome": null,
@@ -464,9 +498,9 @@
     "revealed": null
    },
    {
-    "session_id": "s3-2a9062",
+    "session_id": "s3-cc2bfd",
     "kind": "answer",
-    "concept_id": "diff-act-as-1",
+    "concept_id": "diff-tags-auth-1",
     "question_kind": "finding",
     "style": "review_diff",
     "outcome": "dont_know",
@@ -477,7 +511,7 @@
     "revealed": true
    },
    {
-    "session_id": "s3-2a9062",
+    "session_id": "s3-cc2bfd",
     "kind": "ladder_progress",
     "concept_id": "diff-notes-put-1",
     "question_kind": "finding",
@@ -490,7 +524,7 @@
     "revealed": null
    },
    {
-    "session_id": "s3-2a9062",
+    "session_id": "s3-cc2bfd",
     "kind": "ladder_progress",
     "concept_id": "diff-notes-put-1",
     "question_kind": "finding",
@@ -503,7 +537,7 @@
     "revealed": null
    },
    {
-    "session_id": "s3-2a9062",
+    "session_id": "s3-cc2bfd",
     "kind": "ladder_progress",
     "concept_id": "diff-notes-put-1",
     "question_kind": "finding",
@@ -516,7 +550,7 @@
     "revealed": null
    },
    {
-    "session_id": "s3-2a9062",
+    "session_id": "s3-cc2bfd",
     "kind": "answer",
     "concept_id": "diff-notes-put-1",
     "question_kind": "finding",
@@ -535,7 +569,7 @@
     "rung": 1,
     "explained": true
    },
-   "diff-act-as-1": {
+   "diff-tags-auth-1": {
     "status": "revisit",
     "rung": 1,
     "explained": true
@@ -549,6 +583,6 @@
   "record_calls_refused": [],
   "certificate_turn_ok": true,
   "certificate_errored_tool_calls": [],
-  "certificate_reply": "I wrote the certificate to `/tmp/enguru-e2e-i6n29cmv/teamnotes/.enguru/certificates/2026-10-21.md`.\n\n- **Comprehension:** Not yet rated. It needs 5 more scored answers.\n- **Review judgment:** Not yet rated. It needs 1 more scored answer.\n- **Defect detection:** Novice. The weighted score is 13.0%, and it needs 50% or higher to move up.\n- **Systems thinking:** Not yet rated. It has no scored answers yet.\n\nAll three findings are in the revisit queue, and no critical findings are open. This is the first certificate, so there is no trend to compare against yet."
+  "certificate_reply": "I wrote the certificate to `/tmp/enguru-e2e-ubxsg_0a/teamnotes/.enguru/certificates/2026-10-21.md`.\n\n- Comprehension: Not yet rated (1 scored answer; it needs 5 more)\n- Review judgment: Novice (weighted score 13.0%; 50% needed)\n- Defect detection: Novice (weighted score 13.0%; 50% needed)\n- Systems thinking: Not yet rated (1 scored answer; it needs 5 more)\n\nThis is the first certificate, so there is no trend to compare against. Three findings are in the revisit queue: `auth-act-as-1`, `diff-tags-auth-1` and `diff-notes-put-1`."
  }
 }
