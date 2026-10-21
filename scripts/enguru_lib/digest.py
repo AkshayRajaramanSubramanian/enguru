@@ -38,11 +38,17 @@ class Scope:
     range_id: Optional[str] = None
 
 
+_RANGE_HINT = "Give a range like A..B, for example main..HEAD, or use --uncommitted."
+
+
 def _rev_parse(repo, ref):
+    if not ref or ref.startswith("-"):
+        raise DigestError("no_base", "The range needs a start and an end. " + _RANGE_HINT)
     try:
-        _, out = gitinfo._git(repo, "rev-parse", "--verify", ref + "^{commit}")
-    except RuntimeError as e:
-        raise DigestError("no_base", str(e))
+        _, out = gitinfo._git(repo, "rev-parse", "--verify", "-q", ref + "^{commit}")
+    except RuntimeError:
+        raise DigestError("no_base", "'%s' is not a commit in this repository. %s"
+                          % (ref, _RANGE_HINT))
     return out.strip()
 
 
@@ -57,13 +63,13 @@ def resolve_scope(repo, project, rng, uncommitted, now=None):
         return Scope("diff", None, None, True, gitinfo.worktree_range_id(now))
     if rng:
         if ".." not in rng:
-            raise DigestError("no_base", "Range must look like A..B.")
+            raise DigestError("no_base", "The range must look like A..B. " + _RANGE_HINT)
         a, b = rng.split("..", 1)
         base, head = _rev_parse(repo, a), _rev_parse(repo, b or "HEAD")
     else:
         base = gitinfo.resolve_default_base(repo)
         if base is None:
-            raise DigestError("no_base", "No base branch found; use --range A..B or --uncommitted.")
+            raise DigestError("no_base", "No base branch (main or master) found. " + _RANGE_HINT)
         head = _rev_parse(repo, "HEAD")
     return Scope("diff", base, head, False, gitinfo.range_id(repo, base, head))
 

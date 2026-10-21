@@ -140,3 +140,33 @@ def test_excluded_hunk_body_cannot_forge_headers(tmp_path):
     assert excluded == [".env"]
     assert {h.path for h in hunks} == {"src/a.py"}
     assert not any("x" in l or "y" in l for h in hunks if h.path == ".env" for l in h.lines)
+
+
+def test_uncommitted_includes_untracked_files(tmp_path):
+    r = make_repo(tmp_path, [{"a.py": "one\n", ".gitignore": "ignored.py\n"}], ["c1"])
+    (r / "new.py").write_text("def f():\n    return 1\n")
+    (r / "ignored.py").write_text("x = 1\n")
+    (r / ".env.local").write_text("SECRET=1\n")
+    (r / "pic.bin").write_bytes(b"\x00\x01\x02binary")
+    (r / "yarn.lock").write_text("lock\n")
+    hunks, excluded = gitinfo.diff_hunks(r, None, None, True)
+    assert [(h.path, h.old_start, h.new_start, h.lines) for h in hunks] == [
+        ("new.py", 0, 1, ["+def f():", "+    return 1"])]
+    assert set(excluded) == {".env.local", "pic.bin", "yarn.lock"}
+
+
+def test_uncommitted_untracked_file_lines_capped(tmp_path):
+    r = make_repo(tmp_path, [{"a.py": "one\n"}], ["c1"])
+    (r / "big.py").write_text("".join("x%d = 1\n" % i for i in range(gitinfo.UNTRACKED_MAX_LINES + 50)))
+    (h,), _ = gitinfo.diff_hunks(r, None, None, True)
+    assert len(h.lines) == gitinfo.UNTRACKED_MAX_LINES + 1
+    assert h.lines[-1] == "… [50 more lines truncated]"
+
+
+def test_uncommitted_in_repo_without_commits(tmp_path):
+    r = make_repo(tmp_path, [], [])
+    (r / "staged.py").write_text("a = 1\n")
+    git(r, "add", "staged.py")
+    (r / "loose.py").write_text("b = 2\n")
+    hunks, _ = gitinfo.diff_hunks(r, None, None, True)
+    assert {h.path: h.lines for h in hunks} == {"staged.py": ["+a = 1"], "loose.py": ["+b = 2"]}

@@ -1,3 +1,4 @@
+import pytest
 import json
 import subprocess
 
@@ -171,3 +172,21 @@ def test_cli_empty_diff_and_no_base_errors(tmp_path):
     assert code == 2 and out["error"] == "not_git"
     out = run_cli(["digest", "prep", "--project", "--transcripts-root", root], plain)
     assert out["pending"] == []
+
+
+def test_range_errors_are_friendly(tmp_path):
+    r = make_repo(tmp_path, [{"a.py": "x\n"}], ["init"])
+    for rng in ("..HEAD", "nope..HEAD"):
+        with pytest.raises(digest.DigestError) as e:
+            digest.resolve_scope(r, False, rng, False)
+        assert e.value.code == "no_base"
+        assert "git" not in e.value.message and "A..B" in e.value.message
+
+
+def test_cli_uncommitted_session_with_only_untracked_and_no_commits(tmp_path):
+    r = make_repo(tmp_path, [], [])
+    (r / "new.py").write_text("print(1)\n")
+    s = run_cli(["session", "start", "--diff", "--uncommitted", "--quick"], r)
+    assert s["scope"] == "diff" and s["range_id"].startswith("worktree-")
+    code, out = run_cli_raw(["session", "start", "--diff", "--takeover"], r)
+    assert code == 2 and out["error"] == "no_base" and "failed" not in out["message"]

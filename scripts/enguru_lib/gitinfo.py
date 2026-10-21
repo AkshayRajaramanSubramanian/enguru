@@ -151,9 +151,20 @@ def _is_generated(path):
 _HUNK_HDR = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
-def _diff_range_args(base, head, uncommitted):
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+UNTRACKED_MAX_LINES = 500
+UNTRACKED_MAX_BYTES = 1024 * 1024
+
+
+def has_commits(repo) -> bool:
+    code, _ = _git(repo, "rev-parse", "--verify", "-q", "HEAD^{commit}", check=False)
+    return code == 0
+
+
+def _diff_range_args(repo, base, head, uncommitted):
     if uncommitted:
-        return ["HEAD"]
+        # Worktree against HEAD; with no commits yet, against the empty tree.
+        return ["HEAD" if has_commits(repo) else EMPTY_TREE]
     return ["%s..%s" % (base, head or "HEAD")]
 
 
@@ -180,11 +191,43 @@ def _strip_prefix(p):
     return p[2:] if p.startswith(("a/", "b/")) else p
 
 
+def _excluded_path(path):
+    return _is_generated(path) or is_env_file(path)
+
+
+def _untracked_hunks(repo, start, excluded):
+    """Non-ignored untracked files as all-added hunks (binary, generated, env and
+    oversized files are excluded; long files are cut to UNTRACKED_MAX_LINES)."""
+    _, out = _git(repo, "ls-files", "--others", "--exclude-standard", "-z")
+    hunks = []
+    for path in sorted(p for p in out.split("\0") if p):
+        if path.startswith(".enguru/"):
+            continue
+        full = os.path.join(str(repo), path)
+        try:
+            size = os.path.getsize(full)
+            data = b"" if size > UNTRACKED_MAX_BYTES else open(full, "rb").read()
+        except OSError:
+            continue
+        if _excluded_path(path) or size > UNTRACKED_MAX_BYTES or b"\0" in data[:8000]:
+            if path not in excluded:
+                excluded.append(path)
+            continue
+        lines = data.decode("utf-8", "replace").splitlines()
+        if not lines:
+            continue
+        body = ["+" + line for line in lines[:UNTRACKED_MAX_LINES]]
+        if len(lines) > UNTRACKED_MAX_LINES:
+            body.append("… [%d more lines truncated]" % (len(lines) - UNTRACKED_MAX_LINES))
+        hunks.append(Hunk("h-%d" % (start + len(hunks) + 1), path, 0, 1, body))
+    return hunks
+
+
 def diff_hunks(repo, base, head, uncommitted):
-    rng = _diff_range_args(base, head, uncommitted)
+    rng = _diff_range_args(repo, base, head, uncommitted)
     excluded = []
     for path, binary in _numstat_entries(repo, rng):
-        if binary or _is_generated(path) or is_env_file(path):
+        if binary or _excluded_path(path):
             if path not in excluded:
                 excluded.append(path)
     _, out = _git(repo, "diff", "-U3", "--no-color", "--no-ext-diff", "-M",
@@ -218,6 +261,8 @@ def diff_hunks(repo, base, head, uncommitted):
             cur = Hunk("h-%d" % (len(hunks) + 1), path,
                        int(m.group(1)), int(m.group(2)), [])
             hunks.append(cur)
+    if uncommitted:
+        hunks += _untracked_hunks(repo, len(hunks), excluded)
     return hunks, excluded
 
 
