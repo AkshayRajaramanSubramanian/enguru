@@ -808,3 +808,19 @@ def test_in_progress_ladder_resumes_first_in_a_session_of_another_scope(tmp_path
     progress.record(repo, rec(s2["session_id"], "m1-f", None, "dont_know", qkind="finding",
                               ladder_rung_reached=4, ladder_length=4, revealed=True))
     assert progress.next_item(repo)["action"] == "build_diff_bank"
+
+
+def test_cli_record_and_keylog_take_json_as_an_argument(tmp_path):
+    """Claude Code refuses heredocs holding JSON ("brace with quote character"), so the skill
+    passes records as one single-quoted argument; stdin still works."""
+    repo = diff_repo(tmp_path)
+    write_bank(diff_bank_path(repo, diff_scope(repo)), make_bank(["c1", "c2"]))
+    s = run_cli(["session", "start", "--diff", "--range", "HEAD~1..HEAD", "--quick"], repo)
+    item = run_cli(["next"], repo)
+    r = rec(s["session_id"], item["question"]["concept_id"], item["question"]["id"], "correct")
+    assert run_cli(["record", json.dumps(r)], repo) == {"ok": True, "concept_status": "solid"}
+    code, out = run_cli_raw(["record", "{not json"], repo)
+    assert code == 2 and out["error"] == "state_corrupt" and "not valid JSON" in out["message"]
+    kl = {"question_id": "q", "issue": "i", "evidence": "e"}
+    assert run_cli(["keylog", "add", json.dumps(kl)], repo) == {"ok": True}
+    assert (Path(repo) / ".enguru" / "keylog.jsonl").read_text().count("\n") == 1

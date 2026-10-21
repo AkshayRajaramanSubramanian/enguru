@@ -222,11 +222,13 @@ def _progress_call(fn, *a):
         fail("state_corrupt", str(e))
 
 
-def _stdin_json():
+def _input_json(arg):
+    """The JSON argument if given, else stdin."""
+    where = "the JSON argument" if arg is not None else "stdin"
     try:
-        return json.loads(sys.stdin.read())
+        return json.loads(arg if arg is not None else sys.stdin.read())
     except ValueError as e:
-        fail("state_corrupt", "stdin is not valid JSON: %s" % e)
+        fail("state_corrupt", "%s is not valid JSON: %s" % (where, e))
 
 
 def cmd_session_start(args):
@@ -254,7 +256,7 @@ def cmd_next(args):
 
 def cmd_record(args):
     from enguru_lib import progress
-    rec = _stdin_json()
+    rec = _input_json(args.json)
     emit(_progress_call(progress.record, _repo_root(os.getcwd()), rec))
 
 
@@ -265,7 +267,7 @@ def cmd_status(args):
 
 def cmd_keylog_add(args):
     from enguru_lib import progress
-    entry = _stdin_json()
+    entry = _input_json(args.json)
     _progress_call(progress.keylog_add, _repo_root(os.getcwd()), entry)
     emit({"ok": True})
 
@@ -335,10 +337,14 @@ def build_parser():
     si.add_argument("intensity", choices=["quick", "thorough"])
     si.set_defaults(func=cmd_session_set_intensity)
     sub.add_parser("next", help="next interview item").set_defaults(func=cmd_next)
-    sub.add_parser("record", help="record a result (JSON on stdin)").set_defaults(func=cmd_record)
+    rc = sub.add_parser("record", help="record a result (JSON argument, or JSON on stdin)")
+    rc.add_argument("json", nargs="?")
+    rc.set_defaults(func=cmd_record)
     sub.add_parser("status", help="progress summary").set_defaults(func=cmd_status)
     kl = sub.add_parser("keylog", help="answer-key corrections").add_subparsers(dest="kcmd", required=True)
-    kl.add_parser("add", help="append a correction (JSON on stdin)").set_defaults(func=cmd_keylog_add)
+    ka = kl.add_parser("add", help="append a correction (JSON argument, or JSON on stdin)")
+    ka.add_argument("json", nargs="?")
+    ka.set_defaults(func=cmd_keylog_add)
     ce = sub.add_parser("cert", help="certificate data").add_subparsers(dest="ccmd", required=True)
     cl = ce.add_parser("levels", help="compute skill levels")
     cl.add_argument("--save", action="store_true")

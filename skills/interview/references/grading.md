@@ -27,9 +27,7 @@ One of `correct | partial | incorrect | dont_know | skipped`:
 If the developer makes a valid point the key does not include, check it in the code (read the cited file and lines). If the code confirms it, give credit as if it were a must-have, and log the key as wrong:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py" keylog add <<'JSON'
-{"question_id": "<question.id>", "issue": "missing point: <the point>", "evidence": "<file>:<lines> <what the code shows>"}
-JSON
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py" keylog add '{"question_id": "<question.id>", "issue": "missing point: <the point>", "evidence": "<file>:<lines> <what the code shows>"}'
 ```
 
 ## 4. Holding firm
@@ -71,16 +69,14 @@ Direct, specific, warm. No filler praise ("Great question!", "Awesome!"). A wron
 Record as soon as the question's outcome is final (after any follow-ups), before the next `next`:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py" record <<'JSON'
-{"kind": "answer", "session_id": "<session_id>", "concept_id": "<question.concept_id>",
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py" record '{"kind": "answer", "session_id": "<session_id>", "concept_id": "<question.concept_id>",
  "question_id": "<question.id>", "question_kind": "quiz",
  "style": "<question.style>", "skill": "<question.skill>", "difficulty": "<question.difficulty>",
  "outcome": "correct|partial|incorrect|dont_know|skipped",
  "must_haves_hit": [<indices of must_have points marked hit>],
  "misconception_stated": <true|false>, "hints_used": <0-2>, "followups_used": <0-3>,
  "scope": "<scope>", "range_id": <"range" or null>, "intensity": <"quick"|"thorough"|null>,
- "timestamp": "<YYYY-MM-DDTHH:MM:SSZ>"}
-JSON
+ "timestamp": "<YYYY-MM-DDTHH:MM:SSZ>"}'
 ```
 
 For `skip`: record at once with `"outcome": "skipped"`, `"must_haves_hit": []`, and the hints and follow-ups used so far; say it will come back later, and call `next`.

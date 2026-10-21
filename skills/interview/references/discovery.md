@@ -21,12 +21,10 @@ Judge each answer against `step.expected_realization`, and against `finding.cons
 - **A wrong answer, "I don't know", or `hint`:** if this is the last rung (`rung == ladder_length`), go to section 4. Otherwise move to the next, narrower rung. Say briefly that it isn't that (no explanation of why, which would reveal it), then record the new rung and call `next`, which returns that rung:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py" record <<'JSON'
-{"kind": "ladder_progress", "session_id": "<session_id>", "concept_id": "<concept_id>",
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py" record '{"kind": "ladder_progress", "session_id": "<session_id>", "concept_id": "<concept_id>",
  "question_kind": "finding", "ladder_rung_reached": <rung + 1>, "ladder_length": <ladder_length>,
  "scope": "<scope>", "range_id": <range_id or null>, "intensity": <intensity or null>,
- "timestamp": "<YYYY-MM-DDTHH:MM:SSZ>"}
-JSON
+ "timestamp": "<YYYY-MM-DDTHH:MM:SSZ>"}'
 ```
 
 Rules:
@@ -42,8 +40,7 @@ Rules:
 Then record:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py" record <<'JSON'
-{"kind": "answer", "session_id": "<session_id>", "concept_id": "<concept_id>",
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py" record '{"kind": "answer", "session_id": "<session_id>", "concept_id": "<concept_id>",
  "question_id": null, "question_kind": "finding",
  "style": "review_diff", "skill": "review_judgment", "difficulty": "advanced",
  "outcome": "correct", "must_haves_hit": [], "misconception_stated": false,
@@ -51,8 +48,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py" record <<'JSON'
  "ladder_rung_reached": <rung where they named it>, "ladder_length": <ladder_length>,
  "fix_valid": <true|false>, "revealed": false,
  "scope": "<scope>", "range_id": <range_id or null>, "intensity": <intensity or null>,
- "timestamp": "<YYYY-MM-DDTHH:MM:SSZ>"}
-JSON
+ "timestamp": "<YYYY-MM-DDTHH:MM:SSZ>"}'
 ```
 
 Close with the file and lines and one sentence on why it matters, then call `next`.
