@@ -20,6 +20,8 @@ Usage: python3 e2e/run_e2e.py [--model sonnet] [--max-turns 25] [--keep]
    hold a confirmed finding. Session 1 reaching a ladder is a precondition for (c) and (d):
    when it does not, the driver starts over from a fresh repo (up to --attempts times, all
    recorded in the output) and, after the last attempt, reports (c) and (d) as not exercised.
+   The whole run is capped by --max-minutes: past it, an open session gets `stop`, later
+   sessions and the certificate are skipped, and the assertions report what is missing.
 4. Checks (a)-(f) against .enguru/ and the interviewer transcripts, prints one JSON object,
    saves it to e2e/results/last_run.json, and exits 1 if any assertion fails.
 """
@@ -50,11 +52,17 @@ RESULTS = HERE / "results"
 TX_PLACEHOLDER = "/home/dev/teamnotes"
 DEV_NAME, DEV_EMAIL = "Sam Rivera", "sam@example.com"
 
+# Exactly what the skills run: python3 (the CLI), git (the analyst's read-only history and the
+# certificate's user name), rm (the interview skill clears stale verdict files and failed work
+# files under .enguru/work/ with `rm -f`, so an old verdict is never applied), date (session
+# dates). Read/Write/Grep/Glob for code and .enguru files, Agent/Task for the subagents.
 INTERVIEWER_TOOLS = ("Bash(python3:*) Bash(git:*) Bash(rm:*) Bash(date:*) "
                      "Read Write Grep Glob Agent Task")
 FIRST_TURN_TIMEOUT = 3600   # check, digest, analyst builds and verification happen here
 TURN_TIMEOUT = 1500         # a later turn can still rebuild a module or a revisit concept
 STUDENT_TIMEOUT = 300
+STOP_TURN_TIMEOUT = 300     # time allowed for the `stop` turn once the run deadline has passed
+DEADLINE = {"at": float("inf")}  # wall-clock cap for the whole run (--max-minutes)
 SESSIONS = [("project", "/enguru:interview"),
             ("diff-quick", "/enguru:interview --diff --quick"),
             ("diff-thorough", "/enguru:interview --diff --thorough")]
@@ -117,6 +125,7 @@ def install_transcripts(repo, root):
 def run_claude(args, cwd, timeout, env=None):
     """One `claude -p` call with JSON output. Returns (result_text, ok, seconds)."""
     t0 = time.time()
+    timeout = min(timeout, max(DEADLINE["at"] - t0, STOP_TURN_TIMEOUT))
     try:
         proc = subprocess.run(["claude", "-p", "--output-format", "json", *args], cwd=str(cwd),
                               env=env, capture_output=True, text=True, timeout=timeout,
@@ -257,6 +266,8 @@ def run_interview(repo, env, name, command, model, max_turns, student_cwd):
             reply, out["stopped_by"] = "stop", "persona_stop_mid_ladder"
         elif len(turns) >= max_turns:
             reply, out["stopped_by"] = "stop", "max_turns"
+        elif time.time() >= DEADLINE["at"]:
+            reply, out["stopped_by"] = "stop", "deadline"
         if reply is None:
             reply = student_reply(history, model, student_cwd)
         log("%s turn %d: student -> %r" % (name, len(turns), reply[:80]))
@@ -274,18 +285,22 @@ def check(ok, detail, component):
     return {"pass": bool(ok), "detail": detail, "component": None if ok else component}
 
 
-def assert_a(prog):
-    bad = [a for a in prog["answers"] if (a.get("followups_used") or 0) > 3]
-    return check(not bad, "%d answer records, %d with followups_used > 3"
-                 % (len(prog["answers"]), len(bad)),
+def assert_a(answers):
+    """answers: the evaluated run's records plus those of any discarded attempt."""
+    bad = [a for a in answers if (a.get("followups_used") or 0) > 3]
+    return check(not bad, "%d answer records (all attempts), %d with followups_used > 3"
+                 % (len(answers), len(bad)),
                  "skills/interview/references/grading.md (follow-up limit) or progress.record")
 
 
 def assert_b(prog):
     bad = [a for a in prog["answers"] if a.get("revealed")
-           and (a.get("ladder_rung_reached") or 0) < (a.get("ladder_length") or 0)]
+           and (not isinstance(a.get("ladder_length"), int)
+                or not isinstance(a.get("ladder_rung_reached"), int)
+                or a["ladder_rung_reached"] < a["ladder_length"])]
     reveals = [a for a in prog["answers"] if a.get("revealed")]
-    return check(not bad, "%d revealed ladder records, %d revealed before the last rung"
+    return check(not bad, "%d revealed ladder records, %d revealed before the last rung "
+                 "(or without a ladder_length/rung)"
                  % (len(reveals), len(bad)),
                  "skills/interview/references/discovery.md (no reveal while rungs remain)")
 
@@ -372,18 +387,25 @@ def main(argv=None):
     ap.add_argument("--model", default=common.MODEL)
     ap.add_argument("--max-turns", type=int, default=25)
     ap.add_argument("--keep", action="store_true", help="keep the temp dir for debugging")
+    ap.add_argument("--max-minutes", type=float, default=120,
+                    help="wall-clock cap for the whole run; sessions still open are stopped")
     ap.add_argument("--attempts", type=int, default=3,
                     help="fresh starts allowed when session 1 reaches no ladder")
     args = ap.parse_args(argv)
     t0 = time.time()
-    attempts = []
+    DEADLINE["at"] = t0 + args.max_minutes * 60
+    attempts, discarded_answers = [], []
     for attempt in range(1, args.attempts + 1):
         tmp = Path(tempfile.mkdtemp(prefix="enguru-e2e-")).resolve()
-        repo = build_sample_repo(tmp / "teamnotes")
-        tx_root = tmp / "home" / ".claude" / "projects"
-        install_transcripts(repo, tx_root)
-        student_cwd = tmp / "student"
-        student_cwd.mkdir()
+        try:
+            repo = build_sample_repo(tmp / "teamnotes")
+            tx_root = tmp / "home" / ".claude" / "projects"
+            install_transcripts(repo, tx_root)
+            student_cwd = tmp / "student"
+            student_cwd.mkdir()
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
         env = dict(os.environ, ENGURU_TRANSCRIPTS_ROOT=str(tx_root))
         log("attempt %d: repo %s, plugin copy %s" % (attempt, repo, common.plugin_dir()))
         first = run_interview(repo, env, *SESSIONS[0], args.model, args.max_turns, student_cwd)
@@ -393,8 +415,10 @@ def main(argv=None):
                                          else [])]
         attempts.append({"attempt": attempt, "session1_stopped_by": first["stopped_by"],
                          "modules": modules})
-        if first["stopped_by"] == "persona_stop_mid_ladder" or attempt == args.attempts:
+        if (first["stopped_by"] == "persona_stop_mid_ladder" or attempt == args.attempts
+                or time.time() >= DEADLINE["at"]):
             break
+        discarded_answers += (progress(repo) or {}).get("answers", [])
         # Precondition, not an assertion: the analyst chose the modules and the first one held
         # no confirmed finding, so session 1 had no ladder to stop on. Start over.
         log("attempt %d: session 1 reached no ladder (first module %s); retrying"
@@ -402,14 +426,24 @@ def main(argv=None):
         if not args.keep:
             shutil.rmtree(tmp, ignore_errors=True)
     try:
-        sessions = [first] + [run_interview(repo, env, name, cmd, args.model, args.max_turns,
-                                            student_cwd) for name, cmd in SESSIONS[1:]]
-        log("certificate")
-        cert_sid = str(uuid.uuid4())
-        cert_text, cert_ok, _ = run_claude(
-            ["--plugin-dir", str(common.plugin_dir()), "--model", args.model, "--allowedTools",
-             INTERVIEWER_TOOLS, "--session-id", cert_sid, "/enguru:certificate"],
-            repo, TURN_TIMEOUT, env)
+        sessions = [first]
+        for name, cmd in SESSIONS[1:]:
+            if time.time() >= DEADLINE["at"]:
+                log("%s: skipped, run deadline reached" % name)
+                sessions.append({"name": name, "command": cmd, "claude_session": "",
+                                 "enguru_session": None, "turns": [], "stopped_by": "deadline_skipped",
+                                 "end_text": None, "ended": False, "progress_after": None})
+                continue
+            sessions.append(run_interview(repo, env, name, cmd, args.model, args.max_turns,
+                                          student_cwd))
+        cert_sid, cert_text, cert_ok = "", "skipped: run deadline reached", False
+        if time.time() < DEADLINE["at"]:
+            log("certificate")
+            cert_sid = str(uuid.uuid4())
+            cert_text, cert_ok, _ = run_claude(
+                ["--plugin-dir", str(common.plugin_dir()), "--model", args.model, "--allowedTools",
+                 INTERVIEWER_TOOLS, "--session-id", cert_sid, "/enguru:certificate"],
+                repo, TURN_TIMEOUT, env)
 
         prog = progress(repo) or {"answers": [], "findings": {}, "sessions": []}
         findings = confirmed_findings(repo)
@@ -418,7 +452,7 @@ def main(argv=None):
         d_result, d_next = assert_d(repo, sessions[1], finding, rung)
         e_result, _ = assert_e(repo, prog)
         assertions = {
-            "a_followups_le_3": assert_a(prog),
+            "a_followups_le_3": assert_a(prog["answers"] + discarded_answers),
             "b_no_early_reveal": assert_b(prog),
             "c_stop_discloses_file": assert_c(sessions[0], finding),
             "d_resume_at_saved_rung": d_result,
@@ -453,6 +487,10 @@ def main(argv=None):
                                                    "ladder_rung_reached", "ladder_length", "revealed")}
                             for a in prog["answers"]],
                 "finding_states": prog.get("findings"),
+                "record_calls_refused": [
+                    c for s in sessions for c in refused_calls(s["claude_session"], repo)
+                    if c["call"] and re.search(r"enguru\.py\W* (record|keylog)", c["call"])
+                    and not c["error"].startswith("Exit code")],
                 "certificate_turn_ok": cert_ok,
                 "certificate_errored_tool_calls": refused_calls(cert_sid, repo),
                 "certificate_reply": cert_text[-1500:],
