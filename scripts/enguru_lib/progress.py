@@ -195,7 +195,9 @@ def _confirmed(idx):
 
 
 def _concept_done(prog, cid):
-    if _concept_status(prog, cid) in ("solid", "retired"):
+    """Done for module advancement only: solid, retired, or parked in the revisit queue
+    (a failed deep question comes back through the warm-up revisits, across modules)."""
+    if _concept_status(prog, cid) in ("solid", "retired", "needs_revisit") or cid in prog["revisit"]:
         return True
     f = prog["findings"].get(cid)
     return bool(f) and f["status"] in ("completed", "fixed")
@@ -413,6 +415,8 @@ def _rebuild(repo, prog, idx, cid, reason):
             "bank_path": bank_path,
             "out_path": ".enguru/work/revisit-%s.json" % cid,
             "asked_question_ids": list(prog["concepts"].get(cid, {}).get("asked_question_ids", [])),
+            "phase": selection.rebuild_phase(prog["concepts"].get(cid, {}),
+                                             idx["questions"].get(cid, [])),
             "digest_path": DIGEST_REL, "keylog_path": KEYLOG_REL}
 
 
@@ -429,8 +433,10 @@ def _serve(repo, prog, idx, cid, phase=None, only_phase=None, revisit=False,
         return None
     if stale:
         return _rebuild(repo, prog, idx, cid, "stale")
-    plan = selection.pick(prog["concepts"].get(cid, {}), idx["questions"].get(cid, []),
-                          only_phase)
+    state, qs = prog["concepts"].get(cid, {}), idx["questions"].get(cid, [])
+    plan = selection.pick(state, qs, only_phase)
+    if plan is None and only_phase is None and prog["current"]["rebuilds"].get(cid, 0) >= 1:
+        plan = selection.below_floor(state, qs)  # the rebuild added nothing deeper
     if plan is None:
         return _rebuild(repo, prog, idx, cid, "revisit") if allow_rebuild else None
     q_phase, q = plan
@@ -828,13 +834,16 @@ def record(repo, rec) -> dict:
         phase = selection.phase_of(rec.get("style"))
         if rec["outcome"] in selection.PASSED:
             c["phase_passed"] = max(int(c.get("phase_passed") or 0), phase)
-        if rec["outcome"] == "correct":
-            if phase >= (_deepest_phase(repo, session, cid) or phase):
-                c["status"] = "solid"
-            elif c["status"] == "needs_revisit":
-                c["status"] = "open"
+        deepest = phase >= (_deepest_phase(repo, session, cid) or phase)
+        if rec["outcome"] == "correct" and deepest:
+            c["status"] = "solid"
             _remove_revisit(prog, cid)
-        elif rec["outcome"] == "skipped" or rec.get("followups_used", 0) >= MAX_FOLLOWUPS:
+        elif rec["outcome"] == "correct":
+            pass  # below the deepest phase: a revisit concept stays queued until it gets there
+        elif (rec["outcome"] == "skipped" or rec.get("followups_used", 0) >= MAX_FOLLOWUPS
+              or (deepest and rec["outcome"] in ("incorrect", "dont_know"))):
+            # A failed deepest question parks the concept in revisit so the module can
+            # still advance (_concept_done); it comes back as a warm-up revisit.
             c["status"] = "needs_revisit"
             _add_revisit(prog, cid)
         result = c["status"]

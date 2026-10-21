@@ -196,7 +196,7 @@ def test_revisit_with_all_questions_asked_requests_rebuild(tmp_path):
         "action": "rebuild_concept", "concept_id": "r1", "reason": "revisit",
         "bank_path": ".enguru/banks/diff/%s.json" % scope.range_id,
         "out_path": ".enguru/work/revisit-r1.json",
-        "asked_question_ids": ["q-r1-1"],
+        "asked_question_ids": ["q-r1-1"], "phase": 1,
         "digest_path": ".enguru/digest.json", "keylog_path": ".enguru/keylog.jsonl",
     }
     partial = Path(repo) / ".enguru" / "work" / "revisit-r1.json"
@@ -1122,13 +1122,30 @@ def test_solid_needs_correct_on_the_deepest_phase(tmp_path):
     assert progress.end_session(repo)["solid"] == ["a", "e"]
 
 
-def test_correct_on_a_lower_phase_clears_revisit_but_is_not_solid(tmp_path):
+def test_correct_on_a_lower_phase_keeps_a_revisit_concept_queued(tmp_path):
+    """A concept in revisit stays there (and keeps its module done) until it is correct on
+    its deepest phase; a lower-phase correct only raises phase_passed."""
     repo, scope, s = start_diff(tmp_path, phased_bank({"a": ALL_PHASES}))
     sid = s["session_id"]
     progress.record(repo, rec(sid, "a", "q-a-explain_it1", "skipped"))
     assert load_progress(repo)["revisit"] == ["a"]
     r = progress.record(repo, rec(sid, "a", "q-a-explain_it1", "correct"))
-    assert r["concept_status"] == "open" and load_progress(repo)["revisit"] == []
+    assert r["concept_status"] == "needs_revisit" and load_progress(repo)["revisit"] == ["a"]
+    assert load_progress(repo)["concepts"]["a"]["phase_passed"] == 1
+    r = progress.record(repo, rec(sid, "a", "q-a-spot_the_flaw1", "correct", style="spot_the_flaw"))
+    assert r["concept_status"] == "solid" and load_progress(repo)["revisit"] == []
+
+
+def test_module_does_not_fall_back_while_a_parked_concept_climbs(tmp_path):
+    """Probe follow-up: the revisit answer below the deepest phase does not pull the
+    session back to the earlier module."""
+    repo, s = phased_project(tmp_path, {"a": ("explain_it", "spot_the_flaw")})
+    run_asks(repo, s["session_id"], {"q-a-spot_the_flaw1": "incorrect"}, scope="project")
+    s2 = restart(repo, digest.Scope("project"), None)
+    assert progress.next_item(repo)["action"] == "rebuild_concept"
+    _add_question(repo, "m1", question("q-a-new", "a", "foundational", "explain_it"))
+    answer_ask(repo, s2["session_id"], progress.next_item(repo), "correct", scope="project")
+    assert restart(repo, digest.Scope("project"), None)["module_id"] == "m2"
 
 
 def test_module_advances_once_every_concept_is_solid_on_its_deepest_phase(tmp_path):
@@ -1201,3 +1218,62 @@ def test_session_stopped_before_the_findings_phase_still_discloses(tmp_path):
     answer_ask(repo, s2["session_id"], item)  # then stop, before the findings phase
     out = progress.end_session(repo)
     assert sorted(u["concept_id"] for u in out["undisclosed_critical"]) == ["d-crit", "m1-f"]
+
+
+def _add_question(repo, module, q):
+    bp = Path(repo) / ".enguru" / "banks" / "project" / (module + ".json")
+    b = paths.read_json(bp)
+    b["questions"].append(q)
+    write_bank(bp, b)
+
+
+def test_rebuild_names_the_phase_and_a_below_floor_question_is_served_not_skipped(tmp_path):
+    """Probe: explain right, flaw wrong. The rebuild asks for a phase-3 question; if the
+    analyst still writes only an explain question, that one is served rather than the
+    concept being skipped for good."""
+    repo, s = phased_project(tmp_path, {"a": ("explain_it", "spot_the_flaw")})
+    asked, item = run_asks(repo, s["session_id"], {"q-a-spot_the_flaw1": "incorrect"},
+                           scope="project")
+    assert asked == ["q-a-explain_it1", "q-a-spot_the_flaw1"]
+    s2 = restart(repo, digest.Scope("project"), None)
+    item = progress.next_item(repo)
+    assert item["action"] == "rebuild_concept" and item["concept_id"] == "a"
+    assert item["phase"] == 3
+    _add_question(repo, "m1", question("q-a-new", "a", "foundational", "explain_it"))
+    item = progress.next_item(repo)
+    assert item["action"] == "ask" and item["question"]["id"] == "q-a-new"
+    assert "a" not in load_progress(repo)["current"]["skipped"]
+
+
+def test_rebuild_phase_is_the_next_phase_when_the_concept_had_none_above(tmp_path):
+    repo, s = phased_project(tmp_path, {"a": ("explain_it",)})
+    run_asks(repo, s["session_id"], {"q-a-explain_it1": "skipped"}, scope="project")
+    restart(repo, digest.Scope("project"), None)
+    item = progress.next_item(repo)
+    assert item["action"] == "rebuild_concept" and item["phase"] == 1
+
+
+def test_failed_deepest_question_lets_the_next_module_open_and_comes_back_as_revisit(tmp_path):
+    repo, s = phased_project(tmp_path, {"a": ("explain_it", "spot_the_flaw")})
+    r = None
+    asked, item = run_asks(repo, s["session_id"], {"q-a-spot_the_flaw1": "dont_know"},
+                           scope="project")
+    p = load_progress(repo)
+    assert p["concepts"]["a"]["status"] == "needs_revisit" and p["revisit"] == ["a"]
+    s2 = restart(repo, digest.Scope("project"), None)
+    assert s2["module_id"] == "m2" and s2["revisit_count"] == 1
+    item = progress.next_item(repo)  # warm-up revisit across modules: a needs a new question
+    assert item["action"] == "rebuild_concept" and item["concept_id"] == "a"
+    assert item["phase"] == 3
+    _add_question(repo, "m1", question("q-a-flaw2", "a", "advanced", "spot_the_flaw"))
+    item = progress.next_item(repo)
+    assert item["action"] == "ask" and item["question"]["id"] == "q-a-flaw2"
+    r = answer_ask(repo, s2["session_id"], item, "correct", scope="project")
+    assert r["concept_status"] == "solid" and load_progress(repo)["revisit"] == []
+    assert progress.next_item(repo)["action"] == "build_module"  # then module 2
+
+
+def test_incorrect_below_the_deepest_phase_does_not_send_to_revisit(tmp_path):
+    repo, scope, s = start_diff(tmp_path, phased_bank({"a": ALL_PHASES}))
+    r = progress.record(repo, rec(s["session_id"], "a", "q-a-explain_it1", "incorrect"))
+    assert r["concept_status"] == "open" and load_progress(repo)["revisit"] == []

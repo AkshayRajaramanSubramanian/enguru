@@ -25,6 +25,29 @@ def _difficulty(q):
     return DIFFICULTIES.index(d) if d in DIFFICULTIES else 1
 
 
+def _floor(concept_state, questions):
+    passed = int(concept_state.get("phase_passed") or 0)
+    deepest = deepest_phase(questions)
+    return min(passed + 1, deepest) if deepest else min(passed + 1, QUIZ_PHASES[-1])
+
+
+def rebuild_phase(concept_state, questions):
+    """The phase a rebuild should write for: the lowest phase at or above the concept's
+    floor that it has (or had) questions for, else the next phase after the one passed."""
+    floor = _floor(concept_state, questions)
+    have = sorted({phase_of(q.get("style")) for q in questions if phase_of(q.get("style")) >= floor})
+    return have[0] if have else floor
+
+
+def below_floor(concept_state, questions):
+    """Safety net after a rebuild that added nothing at or above the floor: the newest
+    unasked question below it, as (phase, question), or None."""
+    asked = set(concept_state.get("asked_question_ids", []))
+    floor = _floor(concept_state, questions) if questions else 1
+    left = [q for q in questions if q["id"] not in asked and phase_of(q.get("style")) < floor]
+    return (phase_of(left[-1].get("style")), left[-1]) if left else None
+
+
 def pick(concept_state, questions, only_phase=None):
     """(phase, question) for a concept's next question, or None.
 
@@ -38,7 +61,7 @@ def pick(concept_state, questions, only_phase=None):
     if not questions:
         return None
     asked = set(concept_state.get("asked_question_ids", []))
-    floor = min(int(concept_state.get("phase_passed") or 0) + 1, deepest_phase(questions))
+    floor = _floor(concept_state, questions)
     best = None
     for i, q in enumerate(questions):
         if q["id"] in asked:
