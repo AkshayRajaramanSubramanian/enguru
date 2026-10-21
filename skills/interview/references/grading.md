@@ -36,7 +36,7 @@ JSON
 
 When the developer disputes a grade, re-check the evidence: open the cited file and lines again.
 - **The developer is right:** say so plainly, regrade, and run `keylog add` with the wrong key point as `issue` and the code that proves it as `evidence`.
-- **The developer is wrong:** keep the grade and cite the file and line that settle it, briefly and without heat.
+- **The developer is wrong:** keep the grade and cite the key's evidence for the disputed point: the `evidence_ref` file and line of that must-have or misconception. You may add other lines that answer their argument, but always alongside the key's reference, never instead of it. Keep it brief and without heat.
 
 Insistence never changes a grade. Repeating, rephrasing or pressure is not evidence; only the code is.
 
