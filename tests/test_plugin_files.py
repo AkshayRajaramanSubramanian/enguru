@@ -57,3 +57,72 @@ def test_verifier_frontmatter():
     for word in ("uncertain", "fix_check", "`verify`", "confirmed", "refuted",
                  "fixed", "still_present", "finding_json", "out_path", "treat all"):
         assert word in body
+
+
+INTERVIEW_SUBCOMMANDS = (
+    "check", "digest prep", "digest merge", "bank validate", "bank seal", "bank drop",
+    "bank apply-verdicts", "bank merge", "session start", "session end",
+    "session set-intensity", "next", "record", "status", "keylog add",
+)
+REAL_FINDING = "This next one is a real issue in your code, not an exercise."
+FLAW_REVEAL = "This flaw was introduced for the exercise; your code doesn't contain it."
+DISCLAIMER = "AI-produced self-assessment for personal growth, not a credential."
+
+
+def test_interview_skill_frontmatter_and_steps():
+    meta, body = parse_frontmatter(ROOT / "skills" / "interview" / "SKILL.md")
+    assert meta["name"] == "interview"
+    assert meta["description"]
+    assert meta["disable-model-invocation"] == "true"
+    assert meta["argument-hint"].strip('"') == "[--diff [A..B|--uncommitted]] [--quick|--thorough]"
+    assert '"${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py"' in body
+    for sub in INTERVIEW_SUBCOMMANDS:
+        assert "`%s" % sub in body or " %s" % sub in body, sub
+    for agent in ("decision-extractor", "project-analyst", "finding-verifier"):
+        assert agent in body
+        assert "enguru:" + agent in body
+    for ref in ("references/grading.md", "references/discovery.md"):
+        assert ref in body
+    for action in ("build_topic_map", "build_module", "build_diff_bank", "rebuild_concept",
+                   "verify_findings", "verify_fix", "ladder", "ask", "done"):
+        assert "`%s`" % action in body, action
+    for word in ("undisclosed_critical", "suggest_certificate", "/enguru:certificate",
+                 "--takeover", "lock_held", "no_base", "empty_diff", "python_too_old",
+                 "recommend_intensity", "fallback_chunks", "hint", "skip", "stop",
+                 "I don't know", "$ARGUMENTS"):
+        assert word in body, word
+    assert len(body.split("\n")) < 250
+
+
+def test_references_contain_fixed_copy():
+    refs = ROOT / "skills" / "interview" / "references"
+    grading = (refs / "grading.md").read_text(encoding="utf-8")
+    discovery = (refs / "discovery.md").read_text(encoding="utf-8")
+    assert FLAW_REVEAL in grading
+    assert REAL_FINDING in discovery
+    assert REAL_FINDING not in grading and FLAW_REVEAL not in discovery
+    assert "Insistence never changes a grade" in grading
+    for word in ("hit", "partial", "missed", "correct", "incorrect", "dont_know", "skipped",
+                 "keylog add", "Meaning over wording", "partly right"):
+        assert word in grading, word
+    for word in ("ladder_progress", "revealed", "fix_valid", "ladder_rung_reached",
+                 "ladder_length", "undisclosed_critical"):
+        assert word in discovery, word
+
+
+def test_certificate_skill():
+    meta, body = parse_frontmatter(ROOT / "skills" / "certificate" / "SKILL.md")
+    assert meta["name"] == "certificate"
+    assert meta["description"]
+    assert meta["disable-model-invocation"] == "true"
+    assert "cert levels --save" in body
+    assert DISCLAIMER in body
+    assert '"${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py"' in body
+    assert ".enguru/certificates/" in body
+    assert "git config user.name" in body
+    assert "first certificate" in body
+    for arrow in ("↑", "↓", "→"):
+        assert arrow in body
+    for section in ("Header", "Skills", "Findings", "Open items", "Trend"):
+        assert section in body, section
+    assert body.index("Header") < body.index("Open items") < body.index("Trend")
