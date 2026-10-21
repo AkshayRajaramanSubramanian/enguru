@@ -1,4 +1,5 @@
 """Digest prep: transcript chunks and rule-based structural events."""
+import json
 import re
 import shutil
 from dataclasses import asdict, dataclass
@@ -6,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from . import blast, gitinfo, paths, transcripts
+from . import blast, gitinfo, paths, schema, transcripts
 from .redact import redact
 
 CHUNK_TURNS = 40
@@ -221,6 +222,7 @@ def prep(repo, scope, root):
             is_cached = (cache_dir / ("%s__%d.json" % (s.content_hash, k))).exists()
             chunk_index.append({"chunk_id": cid, "content_hash": s.content_hash, "k": k,
                                 "session_id": s.id, "turn_ids": [t.id for t in part],
+                                "turn_timestamps": {t.id: t.timestamp for t in part},
                                 "cached": is_cached})
             if is_cached:
                 cached.append(cid)
@@ -247,3 +249,200 @@ def prep(repo, scope, root):
         "skipped_lines": skipped})
     paths.atomic_write_json(work / "prep.json", {"chunks": chunk_index})
     return {"pending": pending, "cached": cached, "skipped_lines": skipped}
+
+
+# ---------------------------------------------------------------- merge half
+
+_PUSHBACK = re.compile(
+    r"(?i)\b(no|don'?t|instead|revert|undo|wrong|broke|broken|that'?s not|stop)\b")
+_EXCERPT_STAGES = ((300, "excerpts:300"), (150, "excerpts:150"))
+_MIN_TS = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _ts_key(ts):
+    return (_parse_ts(ts) if ts else None) or _MIN_TS
+
+
+def keyword_events(chunk, timestamps=None):
+    """Fallback events from keywords: first user turn, then pushback turns."""
+    timestamps = timestamps or {}
+    turns = chunk["turns"]
+    sid = chunk.get("session_id")
+    events = []
+    seen_request = False
+    for i, t in enumerate(turns):
+        if t["role"] != "user" or not t["text"].strip():
+            continue
+        ts = timestamps.get(t["id"], "")
+        if not seen_request:
+            seen_request = True
+            events.append({"label": "request", "paraphrase": _para(t["text"]), "files": [],
+                           "session_id": sid, "timestamp": ts,
+                           "source": {"turn_ids": [t["id"]]}, "origin": "keywords"})
+            continue
+        files = None
+        if i > 0 and turns[i - 1]["role"] != "user":
+            prev = turns[i - 1]
+            if prev["files"]:
+                files = prev["files"]
+            elif prev["role"] == "tool" and i > 1 and turns[i - 2]["files"]:
+                files = turns[i - 2]["files"]
+        if files and _PUSHBACK.search(t["text"]):
+            events.append({"label": "pushback", "paraphrase": _para(t["text"]),
+                           "files": sorted(files), "session_id": sid, "timestamp": ts,
+                           "source": {"turn_ids": [t["id"]]}, "origin": "keywords"})
+    return events
+
+
+def _size(digest):
+    return len(json.dumps(digest)) / 4
+
+
+def apply_budget(digest, cap_tokens=20000):
+    """Trim the digest until it fits, recording each stage used in meta.truncation."""
+    meta = digest.setdefault("meta", {})
+    trunc = meta.setdefault("truncation", [])
+
+    def finish():
+        if "events_kept" in meta:
+            meta["events_kept"] = len(digest["events"])
+        return digest
+
+    if _size(digest) <= cap_tokens:
+        return finish()
+    for limit, name in _EXCERPT_STAGES:
+        trunc.append(name)
+        for e in digest["events"]:
+            e["paraphrase"] = e["paraphrase"][:limit]
+        if _size(digest) <= cap_tokens:
+            return finish()
+    trunc.append("drop:request")
+    digest["events"] = [e for e in digest["events"] if e["label"] != "request"]
+    if _size(digest) <= cap_tokens:
+        return finish()
+    # Stage 4 removes at most half of what is left; beyond that, summarise (stage 5).
+    events = digest["events"]
+    order = sorted(range(len(events)), key=lambda i: _ts_key(events[i]["timestamp"]))
+    dropped = set()
+    for i in order[:len(events) // 2]:
+        dropped.add(i)
+        digest["events"] = [e for j, e in enumerate(events) if j not in dropped]
+        if _size(digest) <= cap_tokens:
+            break
+    if dropped:
+        trunc.append("drop:oldest:%d" % len(dropped))
+    if _size(digest) <= cap_tokens:
+        return finish()
+    counts = {}
+    for e in digest["events"]:
+        counts[e["label"]] = counts.get(e["label"], 0) + 1
+    meta["event_counts"] = counts
+    digest["events"] = []
+    trunc.append("events:counts")
+    return finish()
+
+
+def _event_schema():
+    ev = dict(schema.load_schema("digest")["properties"]["events"]["items"])
+    return ev
+
+
+def _valid_cache(data, turn_ids):
+    if not isinstance(data, dict) or not isinstance(data.get("events"), list):
+        return None
+    es = _event_schema()
+    for e in data["events"]:
+        if not isinstance(e, dict) or schema.validate(dict(e, id="x"), es):
+            return None
+        if not set(e["source"].get("turn_ids", [])) <= set(turn_ids):
+            return None
+    return data["events"]
+
+
+def _read_json(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _convert(ev, chunk_meta):
+    stamps = [chunk_meta.get("turn_timestamps", {}).get(t, "") for t in ev["source_turn_ids"]]
+    stamps = [x for x in stamps if x]
+    ts = min(stamps, key=_ts_key) if stamps else ""
+    return {"label": ev["label"], "paraphrase": _para(ev["paraphrase"]), "files": ev["files"],
+            "session_id": chunk_meta["session_id"], "timestamp": ts,
+            "source": {"turn_ids": list(ev["source_turn_ids"])}, "origin": "haiku"}
+
+
+def merge(repo):
+    repo = Path(repo)
+    sd = paths.state_dir(repo)
+    work = sd / "work"
+    try:
+        prep_data = paths.read_json(work / "prep.json")
+        rules = paths.read_json(work / "rules.json")
+    except FileNotFoundError:
+        raise DigestError("state_corrupt", "No digest prep found; run digest prep first.")
+    except paths.StateCorrupt as e:
+        raise DigestError("state_corrupt", "Prep state unreadable (%s); run digest prep again." % e)
+    cache_dir = sd / "cache" / "extractor"
+    ext_schema = schema.load_schema("extracted")
+    chunk_schema = schema.load_schema("chunk")
+
+    events, fallback, dropped = list(rules["events"]), [], 0
+    for cm in prep_data["chunks"]:
+        cid = cm["chunk_id"]
+        turn_ids = set(cm["turn_ids"])
+        cache_path = cache_dir / ("%s__%d.json" % (cm["content_hash"], cm["k"]))
+        if cm["cached"]:
+            cached = _valid_cache(_read_json(cache_path), cm["turn_ids"])
+            if cached is None:
+                fallback.append(cid)
+                try:
+                    cache_path.unlink()
+                except OSError:
+                    pass
+            else:
+                events.extend(cached)
+            continue
+        raw = _read_json(work / "extracted" / (cid + ".json"))
+        if isinstance(raw, dict) and not schema.validate(raw, ext_schema):
+            good = []
+            for ev in raw["events"]:
+                if set(ev["source_turn_ids"]) <= turn_ids:
+                    good.append(_convert(ev, cm))
+                else:
+                    dropped += 1
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            paths.atomic_write_json(cache_path, {"chunk_id": cid, "events": good})
+            events.extend(good)
+            continue
+        fallback.append(cid)
+        chunk = _read_json(work / "chunks" / (cid + ".json"))
+        if isinstance(chunk, dict) and not schema.validate(chunk, chunk_schema):
+            events.extend(keyword_events(chunk, cm.get("turn_timestamps")))
+
+    events.sort(key=lambda e: _ts_key(e["timestamp"]))
+    for i, e in enumerate(events, 1):
+        e["id"] = "ev-%d" % i
+        e["source"] = dict(e["source"])
+    scope = rules["scope"]
+    diff = rules.get("diff")
+    result = {
+        "version": 1,
+        "meta": {"scope": scope["kind"], "range_id": scope.get("range_id"),
+                 "sessions_found": rules["sessions_found"], "sessions_used": rules["sessions_used"],
+                 "events_kept": len(events), "events_dropped": dropped,
+                 "fallback_chunks": fallback, "skipped_lines": rules["skipped_lines"],
+                 "truncation": []},
+        "file_map": rules["file_map"], "git": rules["git"], "events": events, "diff": diff}
+    apply_budget(result)
+    errors = schema.validate(result, schema.load_schema("digest"))
+    if errors:
+        raise DigestError("state_corrupt", "Merged digest failed validation: %s" % errors[0])
+    paths.atomic_write_json(sd / "digest.json", result)
+    m = result["meta"]
+    return {"ok": True, "events_kept": m["events_kept"], "events_dropped": dropped,
+            "fallback_chunks": fallback, "truncation": m["truncation"]}

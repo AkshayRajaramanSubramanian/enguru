@@ -67,6 +67,15 @@ def cmd_digest_prep(args):
         fail(e.code, e.message)
 
 
+def cmd_digest_merge(args):
+    from enguru_lib import digest
+    repo = _repo_root(os.getcwd())
+    try:
+        emit(digest.merge(repo))
+    except digest.DigestError as e:
+        fail(e.code, e.message)
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="enguru")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -80,6 +89,8 @@ def build_parser():
     pp.add_argument("--uncommitted", action="store_true")
     pp.add_argument("--transcripts-root", help=argparse.SUPPRESS)
     pp.set_defaults(func=cmd_digest_prep)
+    mg = dg.add_parser("merge", help="merge extractor output and rule events into the digest")
+    mg.set_defaults(func=cmd_digest_merge)
     return p
 
 
