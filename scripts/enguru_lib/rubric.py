@@ -208,6 +208,7 @@ def _discovered_at(answers, cid):
 # ------------------------------------------------------------------ CLI helper
 
 def _bank_findings(repo):
+    """[(bank path, finding)] for every finding in every bank on disk."""
     out = []
     root = Path(repo) / paths.STATE_DIRNAME / "banks"
     for p in sorted(root.glob("**/*.json")) if root.is_dir() else []:
@@ -216,7 +217,7 @@ def _bank_findings(repo):
         except (paths.StateCorrupt, OSError, ValueError):
             continue
         if isinstance(data, dict):
-            out.extend(f for f in data.get("findings", []) if isinstance(f, dict))
+            out.extend((str(p), f) for f in data.get("findings", []) if isinstance(f, dict))
     return out
 
 
@@ -240,26 +241,42 @@ def cert_levels(repo, save=False, today=None) -> dict:
     prog = progress.load(repo)
     today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     scored = [a for a in prog["answers"] if answer_score(a, cfg) is not None]
+    in_banks = _bank_findings(repo)
     bank_f = {}
-    for f in _bank_findings(repo):
+    for _, f in in_banks:
         if f.get("verdict") == "confirmed" and f.get("concept_id"):
             bank_f[f["concept_id"]] = f
-    findings = []
-    for cid, st in prog["findings"].items():
+    # One entry per issue (spec 8.5): a group of same-issue findings is listed under the
+    # one already worked on, else its first; the others go in its same_issue list.
+    rep_of = {}
+    for group in progress.finding_groups(in_banks):
+        rep = progress.group_winner(group, prog["findings"]) or group[0]
+        for cid in group:
+            rep_of[cid] = rep
+    same = {}
+    for cid, rep in rep_of.items():
+        if cid != rep:
+            same.setdefault(rep, []).append(cid)
+
+    def entry(cid, st, discovered):
         ladder = bank_f.get(cid, {}).get("ladder")
-        findings.append({"concept_id": cid, "status": st.get("status", "open"),
-                         "rung": st.get("rung", 1),
-                         "ladder_length": len(ladder) if isinstance(ladder, list) else None,
-                         "discovered_at": _discovered_at(prog["answers"], cid)})
-    for cid, f in bank_f.items():  # confirmed but never started: open
-        if cid not in prog["findings"]:
-            ladder = f.get("ladder")
-            findings.append({"concept_id": cid, "status": "open", "rung": 1,
-                             "ladder_length": len(ladder) if isinstance(ladder, list) else None,
-                             "discovered_at": None})
+        out = {"concept_id": cid, "status": st.get("status", "open"), "rung": st.get("rung", 1),
+               "ladder_length": len(ladder) if isinstance(ladder, list) else None,
+               "discovered_at": discovered}
+        if same.get(cid):
+            out["same_issue"] = same[cid]
+        return out
+
+    def is_rep(cid):
+        return rep_of.get(cid, cid) == cid
+
+    findings = [entry(cid, st, _discovered_at(prog["answers"], cid))
+                for cid, st in prog["findings"].items() if is_rep(cid)]
+    findings += [entry(cid, {}, None)  # confirmed but never started: open
+                 for cid in bank_f if cid not in prog["findings"] and is_rep(cid)]
     open_critical = sum(
         1 for cid, f in bank_f.items()
-        if f.get("severity") == "critical"
+        if is_rep(cid) and f.get("severity") == "critical"
         and prog["findings"].get(cid, {}).get("status", "open") in ("open", "in_progress")
         and not prog["findings"].get(cid, {}).get("explained"))
     out = {"skills": skill_levels(prog["answers"], cfg),

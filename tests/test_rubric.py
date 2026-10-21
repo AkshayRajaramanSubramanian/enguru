@@ -312,3 +312,44 @@ def test_saved_certificate_records_saved_at(tmp_path):
     data = json.loads((tmp_path / ".enguru" / "certificates" / "2026-10-21.json").read_text())
     assert data["date"] == "2026-10-21" and data["saved_at"].startswith("20")
     assert data["saved_at"].endswith("Z") and "saved_at" not in out
+
+
+def _bank_finding(cid, severity="critical", file="src/auth.js", start=35, end=37, ladder=("a", "b")):
+    return {"concept_id": cid, "verdict": "confirmed", "severity": severity,
+            "lines": {"file": file, "start": start, "end": end}, "ladder": list(ladder)}
+
+
+def test_cert_counts_a_finding_in_two_banks_as_one_issue(tmp_path):
+    """auth-act-as-1 (project) and diff-act-as-1 (diff) cite the same lines: one issue."""
+    sd = tmp_path / ".enguru"
+    _write(sd / "progress.json", {"version": 1, "sessions": [], "answers": [], "concepts": {},
+                                  "revisit": [], "findings": {}, "current": None})
+    _write(sd / "banks" / "project" / "auth.json", {"findings": [_bank_finding("auth-act-as-1")]})
+    _write(sd / "banks" / "diff" / "r0.json", {"findings": [
+        _bank_finding("diff-act-as-1", start=36, end=40),
+        _bank_finding("diff-other", start=36, end=40, severity="major")]})
+    out = rubric.cert_levels(tmp_path)
+    assert out["open_critical"] == 1
+    by_id = {f["concept_id"]: f for f in out["findings"]}
+    assert set(by_id) == {"diff-act-as-1", "diff-other"}
+    assert by_id["diff-act-as-1"]["same_issue"] == ["auth-act-as-1"]
+    assert "same_issue" not in by_id["diff-other"]
+
+
+def test_cert_lists_a_same_issue_group_under_the_finding_worked_on(tmp_path):
+    sd = tmp_path / ".enguru"
+    answers = [mk(1, skill="review_judgment", cid="auth-act-as-1", question_kind="finding",
+                  ladder_rung_reached=2, ladder_length=2, revealed=False)]
+    _write(sd / "progress.json", {
+        "version": 1, "sessions": [], "answers": answers, "concepts": {}, "revisit": [],
+        "findings": {"auth-act-as-1": {"status": "completed", "rung": 2},
+                     "diff-act-as-1": {"status": "completed", "rung": 2,
+                                       "same_as": "auth-act-as-1", "own_state": None}},
+        "current": None})
+    _write(sd / "banks" / "project" / "auth.json", {"findings": [_bank_finding("auth-act-as-1")]})
+    _write(sd / "banks" / "diff" / "r0.json", {"findings": [_bank_finding("diff-act-as-1")]})
+    out = rubric.cert_levels(tmp_path)
+    assert out["open_critical"] == 0
+    assert out["findings"] == [{"concept_id": "auth-act-as-1", "status": "completed", "rung": 2,
+                                "ladder_length": 2, "discovered_at": 2,
+                                "same_issue": ["diff-act-as-1"]}]

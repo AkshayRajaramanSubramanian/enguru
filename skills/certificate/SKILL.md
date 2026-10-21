@@ -23,7 +23,7 @@ Run every command from the repository root, one plain command per Bash call (no 
    - `evidence`: per skill, exactly the answer records that skill's level was computed from, each `{concept_id, session_id, scope, range_id, question_kind, style, difficulty, outcome, misconception_stated, ladder_rung_reached, revealed}`. This is the only evidence you use; do not read `.enguru/` files directly.
    - `previous`: the last certificate's `skills`, or `null`.
    - `scopes`: `project` (bool), `diff_ranges`.
-   - `findings`: `concept_id`, `status`, `rung`, `ladder_length`, `discovered_at` (the ladder step at which the developer worked it out, or `null`).
+   - `findings`: `concept_id`, `status`, `rung`, `ladder_length`, `discovered_at` (the ladder step at which the developer worked it out, or `null`); and `same_issue` (other finding ids for the same issue, found in other scopes) when there are any. Each item is one issue: never list a `same_issue` id separately.
    - `revisit_count`, `open_critical`.
 
    On exit 2, relay `message` and stop.
