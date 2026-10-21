@@ -14,6 +14,8 @@ REVISIT_PER_SESSION = 2
 MAX_FOLLOWUPS = 3
 # Finding statuses whose code change sends the finding to a fix check first.
 RECHECKABLE = ("open", "completed", "in_progress", "revisit")
+# Finding statuses that mean the developer already worked on it, most advanced first.
+WORKED = ("fixed", "completed", "revisit", "in_progress")
 
 DIGEST_REL = ".enguru/digest.json"
 KEYLOG_REL = ".enguru/keylog.jsonl"
@@ -196,11 +198,14 @@ def _confirmed(idx):
 
 def _concept_done(prog, cid):
     """Done for module advancement only: solid, retired, or parked in the revisit queue
-    (a failed deep question comes back through the warm-up revisits, across modules)."""
+    (a failed deep question comes back through the warm-up revisits, across modules).
+    A finding mirroring another (same_as) in revisit is done too: it is out of the queue
+    and comes back through the finding it mirrors."""
     if _concept_status(prog, cid) in ("solid", "retired", "needs_revisit") or cid in prog["revisit"]:
         return True
     f = prog["findings"].get(cid)
-    return bool(f) and f["status"] in ("completed", "fixed")
+    return bool(f) and (f["status"] in ("completed", "fixed")
+                        or (bool(f.get("same_as")) and f["status"] == "revisit"))
 
 
 def _module_concept_ids(tm, module_banks, mid):
@@ -235,7 +240,7 @@ def _mark_staleness(repo, prog, idx):
     for f in _confirmed(idx):
         cid = f["concept_id"]
         st = dict(_finding_state(prog, cid))
-        if cid in stale and st["status"] in RECHECKABLE:
+        if cid in stale and st["status"] in RECHECKABLE and not st.get("same_as"):
             st["prev_status"] = st["status"]
             st["status"] = "recheck"
             prog["findings"][cid] = st
@@ -276,6 +281,7 @@ def _start(repo, scope, intensity, now, sid):
     tm, module_banks, banks = _load_scope(repo, session)
     idx = _index(tm, banks)
     _mark_staleness(repo, prog, idx)
+    _link_duplicates(repo, prog)
     session["module_id"] = _pick_module(prog, tm, module_banks)
     prog["sessions"].append(session)
     prog["current"] = {"session_id": session["id"], "served_concepts": [],
@@ -288,7 +294,8 @@ def _start(repo, scope, intensity, now, sid):
         out["recommend_intensity"] = recommended
     out["open_findings"] = sum(
         1 for f in _confirmed(idx)
-        if _finding_state(prog, f["concept_id"])["status"] in ("open", "in_progress", "recheck"))
+        if _finding_state(prog, f["concept_id"])["status"] in ("open", "in_progress", "recheck")
+        and not _is_duplicate(prog, f["concept_id"]))
     out["revisit_count"] = len(prog["revisit"])
     out["module_id"] = session["module_id"]
     return out
@@ -357,10 +364,11 @@ def end_session(repo, now=None) -> dict:
                  for rel, b in all_banks if rel not in scope_rels]
         idx = _index(tm or all_tm, banks + extra)
         seen = set()
+        listed = {f["concept_id"] for f in _confirmed(idx)}
         for f in _confirmed(idx):
             cid = f["concept_id"]
-            if cid in seen:
-                continue
+            if cid in seen or _finding_state(prog, cid).get("same_as") in listed:
+                continue  # a same-issue mirror is disclosed through the finding it mirrors
             seen.add(cid)
             if (f.get("severity") == "critical" and cid not in explained
                     and not _finding_state(prog, cid).get("explained")
@@ -474,12 +482,20 @@ def _finding_answered_in(prog, cid, sid):
 
 
 def _next_ladder(prog, idx, sid):
+    """The next ladder to serve. A finding mirroring another (same_as) is never served,
+    nor one whose same-issue mate in this scope was already answered this session."""
+    mates = {}
+    for group in finding_groups([(idx["finding_bank"][f["concept_id"]], f)
+                                 for f in _confirmed(idx)]):
+        for cid in group:
+            mates[cid] = group
     best = None
     for order, f in enumerate(_confirmed(idx)):
         cid = f["concept_id"]
         st = _finding_state(prog, cid)
         if (_concept_status(prog, cid) == "retired" or st["status"] not in ("open", "in_progress")
-                or _finding_answered_in(prog, cid, sid)):
+                or st.get("same_as")
+                or any(_finding_answered_in(prog, m, sid) for m in mates.get(cid, [cid]))):
             continue
         key = (0 if st["status"] == "in_progress" else 1,
                0 if f.get("severity") == "critical" else 1, order)
@@ -495,8 +511,9 @@ def _next_ladder(prog, idx, sid):
             "announce": rung == 1 and st["status"] == "open", "finding": f}
 
 
-def _all_banks(repo):
-    """[(rel, bank)] for every bank on disk: project module banks and diff banks."""
+def _all_banks(repo, tolerant=False):
+    """[(rel, bank)] for every bank on disk: project module banks and diff banks.
+    tolerant skips unreadable banks instead of raising."""
     tm = _read_bank(repo, TOPIC_REL)
     rels = [_module_rel(m.get("id")) for m in (tm or {}).get("modules", [])
             if paths.safe_id(m.get("id"))]
@@ -505,10 +522,106 @@ def _all_banks(repo):
         rels += [".enguru/banks/diff/%s" % p.name for p in sorted(diff_dir.glob("*.json"))]
     out = []
     for rel in rels:
-        b = _read_bank(repo, rel)
+        try:
+            b = _read_bank(repo, rel)
+        except ProgressError:
+            if not tolerant:
+                raise
+            continue
         if b is not None:
             out.append((rel, b))
     return tm, out
+
+
+# ------------------------------------------------- same issue in two banks (8.5)
+
+def _span(f):
+    ln = f.get("lines")
+    if not isinstance(ln, dict) or not isinstance(ln.get("file"), str):
+        return None
+    s, e = ln.get("start"), ln.get("end")
+    if not isinstance(s, int) or not isinstance(e, int):
+        return None
+    return ln["file"], min(s, e), max(s, e)
+
+
+def _same_issue(a, b):
+    (rel_a, fa, sa), (rel_b, fb, sb) = a, b
+    return (rel_a != rel_b and sa is not None and sb is not None
+            and fa.get("severity") == fb.get("severity") and sa[0] == sb[0]
+            and sa[1] <= sb[2] and sb[1] <= sa[2])
+
+
+def finding_groups(bank_findings):
+    """Group confirmed findings from [(bank_rel, finding)] that are one issue: same file,
+    overlapping lines, same severity, from different banks (spec 8.5). Returns lists of
+    concept ids in input order; singletons included."""
+    items, seen = [], set()
+    for rel, f in bank_findings:
+        cid = f.get("concept_id")
+        if f.get("verdict") == "confirmed" and cid and cid not in seen:
+            seen.add(cid)
+            items.append((rel, f, _span(f)))
+    group_of = list(range(len(items)))
+    for i in range(len(items)):
+        for j in range(i + 1, len(items)):
+            if group_of[i] != group_of[j] and _same_issue(items[i], items[j]):
+                old = group_of[j]
+                group_of = [group_of[i] if g == old else g for g in group_of]
+    groups = {}
+    for g, (_, f, _) in zip(group_of, items):
+        groups.setdefault(g, []).append(f["concept_id"])
+    return list(groups.values())
+
+
+def _worked_status(st):
+    s = st.get("status", "open")
+    return (st.get("prev_status") or "open") if s == "recheck" else s
+
+
+def group_winner(group, states):
+    """The finding already worked on that stands for its group, or None when none is.
+    Findings mirroring another member never win; among the rest, the most advanced
+    status wins (WORKED order), then the earliest."""
+    own = [c for c in group if states.get(c, {}).get("same_as") not in group]
+    worked = [c for c in own if _worked_status(states.get(c, {})) in WORKED]
+    if not worked:
+        return None
+    return min(worked, key=lambda c: (WORKED.index(_worked_status(states[c])), group.index(c)))
+
+
+def _link_duplicates(repo, prog):
+    """Mirror each worked-on finding's state onto the other findings for the same issue,
+    marked same_as, so they are never laddered on their own. A finding no longer in a
+    group gets its own state back. Returns whether prog changed."""
+    before = json.dumps(prog["findings"], sort_keys=True), list(prog["revisit"])
+    _, banks = _all_banks(repo, tolerant=True)
+    states = prog["findings"]
+    linked = set()
+    for group in finding_groups([(rel, f) for rel, b in banks for f in b.get("findings", [])]):
+        win = group_winner(group, states) if len(group) > 1 else None
+        if win is None:
+            continue
+        mirror = {k: v for k, v in states[win].items() if k not in ("same_as", "own_state")}
+        for cid in group:
+            if cid == win:
+                continue
+            old = states.get(cid)
+            own = old.get("own_state") if old and old.get("same_as") else old
+            states[cid] = dict(mirror, same_as=win, own_state=own)
+            _remove_revisit(prog, cid)
+            linked.add(cid)
+    for cid, st in list(states.items()):
+        if st.get("same_as") and cid not in linked:
+            if st.get("own_state"):
+                states[cid] = st["own_state"]
+            else:
+                del states[cid]
+    return (json.dumps(prog["findings"], sort_keys=True), list(prog["revisit"])) != before
+
+
+def _is_duplicate(prog, cid):
+    return bool(prog["findings"].get(cid, {}).get("same_as"))
 
 
 def _resumable(repo, prog, idx, f):
@@ -544,7 +657,9 @@ def _resume_ladder(repo, prog, sid):
     before = json.dumps(prog, sort_keys=True)
     idx["findings"] = [f for f in idx["findings"]
                        if _finding_state(prog, f["concept_id"])["status"] == "in_progress"
-                       and f.get("verdict") == "confirmed" and _resumable(repo, prog, idx, f)]
+                       and f.get("verdict") == "confirmed"
+                       and not _is_duplicate(prog, f["concept_id"])
+                       and _resumable(repo, prog, idx, f)]
     if json.dumps(prog, sort_keys=True) != before:
         _save(repo, prog)
     return _next_ladder(prog, idx, sid)
@@ -553,7 +668,7 @@ def _resume_ladder(repo, prog, sid):
 def _revisit_ladder(repo, prog, idx, cid):
     """A finding explained by last resort comes back through the revisit step: its ladder
     from rung 1, without the announcement."""
-    if _finding_state(prog, cid)["status"] != "revisit":
+    if _finding_state(prog, cid)["status"] != "revisit" or _is_duplicate(prog, cid):
         return None
     f = next((f for f in _confirmed(idx) if f["concept_id"] == cid), None)
     if f is None:
@@ -584,6 +699,8 @@ def next_item(repo) -> dict:
     for k in ("rebuilds", "skipped", "served_phases"):
         cur.setdefault(k, {})
     cur.setdefault("revisit_ladders", [])
+    if _link_duplicates(repo, prog):
+        _save(repo, prog)
     if session["scope"] == "project":
         if _read_bank(repo, TOPIC_REL) is None:
             return _build_action("build_topic_map", TOPIC_REL, "topic-map")
@@ -606,7 +723,8 @@ def next_item(repo) -> dict:
 
     for f in _confirmed(idx):
         cid = f["concept_id"]
-        if _finding_state(prog, cid)["status"] == "recheck" and _concept_status(prog, cid) != "retired":
+        if (_finding_state(prog, cid)["status"] == "recheck" and not _is_duplicate(prog, cid)
+                and _concept_status(prog, cid) != "retired"):
             return {"action": "verify_fix", "concept_id": cid, "finding": f,
                     "bank_path": idx["finding_bank"][cid],
                     "out_path": ".enguru/work/verdicts/fixcheck-%s.json" % cid}
@@ -851,6 +969,8 @@ def record(repo, rec) -> dict:
     if (cur and cur.get("pending") and kind == "answer"
             and cid == cur["pending"]["concept_id"]):
         cur["pending"] = None
+    if kind != "answer" or rec["question_kind"] == "finding":
+        _link_duplicates(repo, prog)  # carry the new state to the same issue's other findings
     _save(repo, prog)
     return {"ok": True, "concept_status": result}
 

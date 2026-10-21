@@ -1277,3 +1277,178 @@ def test_incorrect_below_the_deepest_phase_does_not_send_to_revisit(tmp_path):
     repo, scope, s = start_diff(tmp_path, phased_bank({"a": ALL_PHASES}))
     r = progress.record(repo, rec(s["session_id"], "a", "q-a-explain_it1", "incorrect"))
     assert r["concept_status"] == "open" and load_progress(repo)["revisit"] == []
+
+
+# ------------------------------------------------- same issue in two banks (8.5)
+
+def _spanned(cid, severity="critical", file="auth.py", start=1, end=2, verdict="confirmed"):
+    f = finding(cid, severity, file=file, verdict=verdict)
+    f["lines"].update(start=start, end=end)
+    return f
+
+
+def test_finding_groups_need_file_overlap_severity_and_different_banks():
+    a = _spanned("a", start=30, end=40)
+    groups = progress.finding_groups([
+        ("p.json", a),
+        ("d.json", _spanned("b", start=35, end=37)),           # same issue as a
+        ("d.json", _spanned("c", start=38, end=50)),           # same bank as b, but overlaps a
+        ("d.json", _spanned("d", severity="major", start=35, end=37)),
+        ("d.json", _spanned("e", start=41, end=45)),           # no overlap with a
+        ("d.json", _spanned("f", file="other.py", start=35, end=37)),
+        ("d.json", _spanned("g", start=35, end=37, verdict="pending")),
+        ("p2.json", a)])                                       # same id twice counts once
+    assert groups == [["a", "b", "c"], ["d"], ["e"], ["f"]]
+
+
+def _project_finding_bank(repo, f):
+    pdir = Path(repo) / ".enguru" / "banks" / "project"
+    write_bank(pdir / "topic-map.json",
+               {"modules": [{"id": "m1", "title": "M1", "concepts": [concept("a")]}]})
+    write_bank(pdir / "m1.json", make_bank(["a"], [f], scope_key="project"))
+
+
+def test_finding_completed_in_project_is_not_laddered_again_in_diff(tmp_path):
+    """The e2e case: auth-act-as-1 and diff-act-as-1 both cite auth.js:35-37."""
+    repo = diff_repo(tmp_path, {"auth.py": LINES})
+    s = progress.start_session(repo, digest.Scope("project"), None)
+    _project_finding_bank(repo, _spanned("m1-f", start=3, end=5))
+    _, item = drain_asks(repo, s["session_id"], scope="project")  # findings come last
+    assert item["action"] == "ladder" and item["concept_id"] == "m1-f"
+    finish_ladder(repo, s["session_id"], "m1-f")
+    progress.end_session(repo)
+    scope = diff_scope(repo)
+    write_bank(diff_bank_path(repo, scope), make_bank(["c1"], [_spanned("d-f", start=4, end=9)]))
+    s2 = progress.start_session(repo, scope, "quick")
+    assert s2["open_findings"] == 0
+    item = progress.next_item(repo)
+    assert item["action"] == "ask" and item["question"]["concept_id"] == "c1"
+    st = load_progress(repo)["findings"]["d-f"]
+    assert st["status"] == "completed" and st["same_as"] == "m1-f"
+    # the findings phase does not ladder the mirror either
+    assert drain_asks(repo, s2["session_id"])[1]["action"] == "done"
+    assert progress.end_session(repo)["undisclosed_critical"] == []
+
+
+def test_ladder_progress_carries_over_and_resumes_the_finding_already_worked(tmp_path):
+    repo = diff_repo(tmp_path, {"auth.py": LINES})
+    scope = diff_scope(repo)
+    s = progress.start_session(repo, digest.Scope("project"), None)
+    _project_finding_bank(repo, _spanned("m1-f", start=3, end=5))
+    write_bank(diff_bank_path(repo, scope), make_bank(["c1"], [_spanned("d-f", start=5, end=6)]))
+    assert drain_asks(repo, s["session_id"], scope="project")[1]["concept_id"] == "m1-f"
+    progress.record(repo, rec(s["session_id"], "m1-f", None, "incorrect", kind="ladder_progress",
+                              qkind="finding", ladder_rung_reached=2, ladder_length=3,
+                              scope="project"))
+    st = load_progress(repo)["findings"]["d-f"]  # carried over at once by record
+    assert st == {"status": "in_progress", "rung": 2, "same_as": "m1-f", "own_state": None}
+    progress.end_session(repo)
+    s2 = progress.start_session(repo, scope, "quick")
+    asked, item = drain_asks(repo, s2["session_id"])  # the quiz first, then the findings
+    assert asked == ["q-c1-1"]
+    assert item["action"] == "ladder" and item["concept_id"] == "m1-f" and item["rung"] == 2
+    progress.record(repo, rec(s2["session_id"], "m1-f", None, "correct", qkind="finding",
+                              ladder_rung_reached=2, ladder_length=3))
+    assert progress.next_item(repo)["action"] == "done"  # d-f is not laddered on its own
+    assert load_progress(repo)["findings"]["d-f"]["status"] == "completed"
+    # one issue, disclosed once, even when stopped partway
+    assert progress.end_session(repo)["undisclosed_critical"] == []
+
+
+def test_open_duplicates_in_one_scope_ladder_once_per_session(tmp_path):
+    """Two module banks of one project emit the same issue: only one ladder is served,
+    and skipping it does not bring up the other in the same session."""
+    repo = diff_repo(tmp_path, {"auth.py": LINES})
+    s = progress.start_session(repo, digest.Scope("project"), None)
+    pdir = Path(repo) / ".enguru" / "banks" / "project"
+    write_bank(pdir / "topic-map.json", {"modules": [
+        {"id": "m1", "title": "M1", "concepts": [concept("a")]},
+        {"id": "m2", "title": "M2", "concepts": [concept("b", module="m2")]}]})
+    write_bank(pdir / "m1.json", make_bank(["a"], [_spanned("m1-f")], scope_key="project"))
+    write_bank(pdir / "m2.json", make_bank(["b"], [_spanned("m2-f")], scope_key="project"))
+    _, item = drain_asks(repo, s["session_id"], scope="project")  # findings come last
+    assert item["action"] == "ladder" and item["concept_id"] == "m1-f"
+    progress.record(repo, rec(s["session_id"], "m1-f", None, "skipped", qkind="finding"))
+    assert progress.next_item(repo)["action"] == "done"  # m2-f is not served instead
+
+
+def test_worked_twice_before_dedup_keeps_the_most_advanced(tmp_path):
+    """State written before deduplication: one copy completed, the other stopped partway.
+    The completed one wins; the other mirrors it and is not resumed."""
+    repo = diff_repo(tmp_path, {"auth.py": LINES})
+    scope = diff_scope(repo)
+    _project_finding_bank(repo, _spanned("m1-f"))
+    write_bank(diff_bank_path(repo, scope), make_bank(["c1"], [_spanned("d-f")]))
+    p = progress.load(repo)
+    p["findings"] = {"m1-f": {"status": "in_progress", "rung": 2},
+                     "d-f": {"status": "completed", "rung": 1}}
+    paths.state_dir(repo)
+    paths.atomic_write_json(Path(repo) / ".enguru" / "progress.json", p)
+    s = progress.start_session(repo, scope, "quick")
+    assert progress.next_item(repo)["question"]["concept_id"] == "c1"
+    assert drain_asks(repo, s["session_id"])[1]["action"] == "done"  # m1-f is not resumed
+    st = load_progress(repo)["findings"]["m1-f"]
+    assert st["status"] == "completed" and st["same_as"] == "d-f"
+    assert st["own_state"] == {"status": "in_progress", "rung": 2}
+
+
+def test_rebuilt_bank_that_no_longer_matches_restores_own_state(tmp_path):
+    repo = diff_repo(tmp_path, {"auth.py": LINES})
+    scope = diff_scope(repo)
+    _project_finding_bank(repo, _spanned("m1-f"))
+    write_bank(diff_bank_path(repo, scope), make_bank(["c1"], [_spanned("d-f")]))
+    p = progress.load(repo)
+    p["findings"] = {"m1-f": {"status": "completed", "rung": 1}}
+    paths.state_dir(repo)
+    paths.atomic_write_json(Path(repo) / ".enguru" / "progress.json", p)
+    s = progress.start_session(repo, scope, "quick")
+    assert load_progress(repo)["findings"]["d-f"]["same_as"] == "m1-f"
+    write_bank(diff_bank_path(repo, scope), make_bank(["c1"], [_spanned("d-f", start=10, end=12)]))
+    _, item = drain_asks(repo, s["session_id"])  # findings come last
+    assert item["action"] == "ladder" and item["concept_id"] == "d-f" and item["announce"] is True
+    assert "d-f" not in load_progress(repo)["findings"]
+
+
+def test_one_issue_stopped_partway_is_disclosed_once_when_the_session_ends_early(tmp_path):
+    """Findings come last, so a session can end before it resumes a ladder from another
+    scope: the issue is still disclosed, but once, not once per bank."""
+    repo = diff_repo(tmp_path, {"auth.py": LINES})
+    scope = diff_scope(repo)
+    s = progress.start_session(repo, digest.Scope("project"), None)
+    _project_finding_bank(repo, _spanned("m1-f", start=3, end=5))
+    write_bank(diff_bank_path(repo, scope), make_bank(["c1"], [_spanned("d-f", start=5, end=6)]))
+    assert drain_asks(repo, s["session_id"], scope="project")[1]["concept_id"] == "m1-f"
+    progress.record(repo, rec(s["session_id"], "m1-f", None, "incorrect", kind="ladder_progress",
+                              qkind="finding", ladder_rung_reached=2, ladder_length=3,
+                              scope="project"))
+    progress.end_session(repo)
+    progress.start_session(repo, scope, "quick")
+    assert progress.next_item(repo)["action"] == "ask"
+    undisclosed = progress.end_session(repo)["undisclosed_critical"]
+    assert [u["concept_id"] for u in undisclosed] == ["m1-f"]
+
+
+def test_mirror_of_a_finding_in_revisit_does_not_block_its_module(tmp_path):
+    """A finding explained by last resort in a diff session goes to revisit; its project
+    mirror leaves the queue (it is never laddered on its own) and counts as done for module
+    advancement, like the finding it mirrors."""
+    repo = diff_repo(tmp_path, {"auth.py": LINES})
+    scope = diff_scope(repo)
+    write_bank(diff_bank_path(repo, scope), make_bank(["c1"], [_spanned("d-f", start=3, end=5)]))
+    s = progress.start_session(repo, scope, "quick")
+    assert drain_asks(repo, s["session_id"])[1]["concept_id"] == "d-f"
+    assert finish_ladder(repo, s["session_id"], "d-f", revealed=True)["concept_status"] == "revisit"
+    progress.end_session(repo)
+    pdir = Path(repo) / ".enguru" / "banks" / "project"
+    write_bank(pdir / "topic-map.json", {"modules": [
+        {"id": "m1", "title": "M1", "concepts": [concept("a")]},
+        {"id": "m2", "title": "M2", "concepts": [concept("z", module="m2")]}]})
+    write_bank(pdir / "m1.json", make_bank(["a"], [_spanned("m1-f", start=4, end=4)],
+                                           scope_key="project"))
+    s2 = progress.start_session(repo, digest.Scope("project"), None)
+    assert s2["module_id"] == "m1"
+    p = load_progress(repo)
+    assert p["findings"]["m1-f"]["same_as"] == "d-f" and p["revisit"] == ["d-f"]
+    assert drain_asks(repo, s2["session_id"], "correct", scope="project")[1]["action"] == "done"
+    progress.end_session(repo)
+    assert progress.start_session(repo, digest.Scope("project"), None)["module_id"] == "m2"

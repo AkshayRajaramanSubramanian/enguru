@@ -239,6 +239,14 @@ A real issue in the code that falls into one of these: security exposure, data l
 ### 8.4 Resolution
 The plugin doesn't fix anything. On a later run, if a finding's evidence hashes have changed, the verifier checks again. If the issue is resolved, the finding is marked `fixed` and shown on the certificate.
 
+### 8.5 Same issue in more than one bank
+Project and diff banks are built separately, so one issue can come back as two findings (e.g. `auth-act-as-1` in a project module bank and `diff-act-as-1` in a diff bank, both citing `src/auth.js:35-37`). Two confirmed findings are **the same issue** when they come from different banks, cite the same file with overlapping line ranges, and have the same severity. Findings in the same bank are always distinct: one analyst run already chose to separate them.
+- **Winner:** the finding already worked on (`fixed`, then `completed`, `revisit`, `in_progress`; a `recheck` counts as the status it came from). If none has been worked on, there is no winner yet; the first one served becomes it.
+- **Carry-over:** every other finding in the group mirrors the winner's state in `progress.json`, marked `same_as: <winner>` (its own earlier state is kept as `own_state`). A mirror is never laddered, resumed or fix-checked on its own, so a finding completed in one scope doesn't re-ladder in another. The mirror is refreshed whenever `next`, `session start` or a finding record runs. If a rebuilt bank no longer matches, the mirror gets its own state back. A mirror in `revisit` leaves the revisit queue (the finding it mirrors comes back instead) and counts as done for module advancement, like that finding.
+- **Open duplicates:** until one is worked on, a session serves at most one ladder per group; skipping it doesn't bring up the other in the same session.
+- **Disclosure and certificate:** the session summary (§9.5) and `open_critical` count each issue once. The certificate's findings list has one item per issue, under the winner (or the first), with the others in `same_issue`.
+- **Analyst:** `project-analyst` in `diff_bank` mode is not told about project findings and may still emit a duplicate. Dropping it there would remove a real finding from the diff session (quick mode always includes findings in the diff), and the rules above already make the duplicate harmless.
+
 ## 9. Interview
 
 ### 9.1 Session start
@@ -421,3 +429,5 @@ A small sample vibe-coded app with real transcripts, run through project mode, q
 | Mandatory disclosure of critical findings | The teaching method must never hide a real critical issue |
 | Levels calculated by a script | Consistent levels; meaningful trend |
 | Per-repo certificate | Simplicity; anti-memorization handled by requiring 2+ distinct diff ranges |
+| One issue found in two banks is deduplicated in the scripts (same file, overlapping lines, same severity, different banks; the finding already worked on wins and its state carries over) | One bug shouldn't take two ladders or count twice on the certificate; a script rule is deterministic, unlike asking the analyst to avoid duplicates (§8.5) |
+| The diff analyst is not told about project findings | Omitting a duplicate would drop a real finding from the diff session; the script rule already handles it |
