@@ -781,3 +781,30 @@ def test_cli_bank_promote_only_moves_valid_builds(tmp_path):
     write_bank(work, make_bank(["c1"]))
     code, out = run_cli_raw(["bank", "promote", ".enguru/work/build-diff-x.json", "app.json"], repo)
     assert code == 2 and out["error"] == "state_corrupt" and not (Path(repo) / "app.json").exists()
+
+
+def test_in_progress_ladder_resumes_first_in_a_session_of_another_scope(tmp_path):
+    """A ladder stopped partway in project mode resumes at its rung as the first item of the
+    next session, even a diff session whose bank is not built yet."""
+    repo = diff_repo(tmp_path, {"auth.py": LINES})
+    s = progress.start_session(repo, digest.Scope("project"), None)
+    pdir = Path(repo) / ".enguru" / "banks" / "project"
+    f = finding("m1-f", "critical", rungs=4, file="auth.py")
+    write_bank(pdir / "topic-map.json",
+               {"modules": [{"id": "m1", "title": "M1", "concepts": [concept("a")]}]})
+    write_bank(pdir / "m1.json", make_bank(["a"], [f], scope_key="project"))
+    assert progress.next_item(repo)["rung"] == 1
+    progress.record(repo, rec(s["session_id"], "m1-f", None, "incorrect", kind="ladder_progress",
+                              qkind="finding", ladder_rung_reached=2, ladder_length=4,
+                              scope="project"))
+    out = progress.end_session(repo)
+    assert [u["concept_id"] for u in out["undisclosed_critical"]] == ["m1-f"]
+    scope = diff_scope(repo)
+    s2 = progress.start_session(repo, scope, "quick")
+    item = progress.next_item(repo)
+    assert item["action"] == "ladder" and item["concept_id"] == "m1-f"
+    assert item["rung"] == 2 and item["step"] == f["ladder"][1] and item["announce"] is False
+    # once answered this session it is not served again; the diff flow continues
+    progress.record(repo, rec(s2["session_id"], "m1-f", None, "dont_know", qkind="finding",
+                              ladder_rung_reached=4, ladder_length=4, revealed=True))
+    assert progress.next_item(repo)["action"] == "build_diff_bank"

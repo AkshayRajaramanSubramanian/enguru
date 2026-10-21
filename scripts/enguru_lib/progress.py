@@ -457,6 +457,33 @@ def _next_ladder(prog, idx, sid):
             "announce": rung == 1 and st["status"] == "open", "finding": f}
 
 
+def _all_banks(repo):
+    """[(rel, bank)] for every bank on disk: project module banks and diff banks."""
+    tm = _read_bank(repo, TOPIC_REL)
+    rels = [_module_rel(m.get("id")) for m in (tm or {}).get("modules", [])
+            if isinstance(m.get("id"), str) and _SAFE_NAME.match(m["id"])]
+    diff_dir = Path(repo) / ".enguru" / "banks" / "diff"
+    if diff_dir.is_dir():
+        rels += [".enguru/banks/diff/%s" % p.name for p in sorted(diff_dir.glob("*.json"))]
+    out = []
+    for rel in rels:
+        b = _read_bank(repo, rel)
+        if b is not None:
+            out.append((rel, b))
+    return tm, out
+
+
+def _resume_ladder(repo, prog, sid):
+    """A ladder stopped partway (in_progress) in any scope resumes first, at its saved rung."""
+    if not any(f.get("status") == "in_progress" for f in prog["findings"].values()):
+        return None
+    tm, banks = _all_banks(repo)
+    idx = _index(tm, banks)
+    idx["findings"] = [f for f in idx["findings"]
+                       if _finding_state(prog, f["concept_id"])["status"] == "in_progress"]
+    return _next_ladder(prog, idx, sid)
+
+
 def _open_finding_concepts(prog, idx):
     return {f["concept_id"] for f in _confirmed(idx)
             if _finding_state(prog, f["concept_id"])["status"] in ("open", "in_progress", "recheck")}
@@ -469,6 +496,12 @@ def next_item(repo) -> dict:
     cur = prog["current"]
     for k in ("rebuilds", "skipped"):
         cur.setdefault(k, {})
+    resume = _resume_ladder(repo, prog, session["id"])
+    if resume:
+        if resume["concept_id"] not in cur["served_concepts"]:
+            cur["served_concepts"].append(resume["concept_id"])
+            _save(repo, prog)
+        return resume
     if session["scope"] == "project":
         if _read_bank(repo, TOPIC_REL) is None:
             return _build_action("build_topic_map", TOPIC_REL, "topic-map")
