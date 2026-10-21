@@ -68,4 +68,4 @@ If the developer is still stuck after the final rung (`rung == ladder_length`), 
 
 > A real critical issue remains in **<title>** (`<file>`). I'm not explaining it here so you can work it out yourself; run `/enguru:interview` again to continue.
 
-Never add hints, lines, the consequence or the fix to the disclosure.
+Never add hints, lines, the consequence or the fix to the disclosure, and keep the rest of the summary (solid, revisit, takeaway) free of anything that points toward it.

@@ -139,6 +139,6 @@ If `uncovered` is non-empty, list those concept titles or ids as not covered thi
 Run `enguru session end`. It returns `solid`, `revisit`, `undisclosed_critical`, `suggest_certificate`. Give a short summary:
 - **Solid:** concepts the developer showed they understand (`solid`).
 - **To revisit:** concepts queued for next time (`revisit`).
-- **Takeaway:** the single most important thing to remember from this session, one or two sentences, drawn only from what was worked through. Never base it on a real finding that is still undisclosed (stopped partway, skipped or not reached): no general lesson, principle or question that points toward it.
+- **Takeaway:** the single most important thing to remember from this session, one or two sentences, drawn only from quiz answers and findings that were worked through. If `undisclosed_critical` is non-empty, check your takeaway against each of those findings' remaining ladder steps: if it would help answer any of them (a general lesson, a principle, or a question to ask of the code counts), drop it. Use a takeaway from another concept, or, if nothing else was covered, write: "The most important next step is to finish the real issue below."
 - **Every** `undisclosed_critical` item, using the disclosure copy in `references/discovery.md`: area (its `title`) and `file` only, never an explanation or hint.
 - If `suggest_certificate` is true: "You have enough new evidence for an updated certificate: run `/enguru:certificate`."
