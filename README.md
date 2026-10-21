@@ -12,6 +12,12 @@ decisions, then asks them one at a time:
 - **Spot the flaw**: a real snippet with one injected bug (defect detection).
 - **What if**: what your components do when something fails (systems thinking).
 
+Each session builds up rather than starting deep: first **explain it** questions on what the
+code is, then **what if**, then **spot the flaw** and **review a diff**, easiest first within
+each step. A topic moves to the next step only after you answer the previous one well enough
+(correct or partly right), and counts as solid once you get its deepest question right.
+Real issues in your code come last.
+
 It grades answers on meaning, not keywords, and holds its grade unless the code proves you
 right. If it finds a **real issue** in your code (a security hole, data loss, money errors,
 a crash on a main path), an independent verifier checks it first. Then, instead of telling
@@ -60,11 +66,13 @@ Run these from inside the repository you want to be interviewed about.
 /enguru:certificate                        Write the certificate for this repo
 ```
 
-- **Project mode** splits the project into 4 to 8 modules and covers one module per session.
+- **Project mode** splits the project into 4 to 8 modules and covers one module per session,
+  starting with what the project is and its core flow, then more specialized parts.
   Questions for a module are built when that module starts.
 - **Diff mode** covers a change and the code it affects, riskiest first. **Quick** asks about
   5 concepts plus any real issues; **thorough** asks up to 2 questions on each of up to 12
-  concepts. The default base is the merge-base with `origin/HEAD`, then `main`, then `master`.
+  concepts. Both go step by step across the concepts (explain it, then what if, then spot
+  the flaw), with real issues at the end. The default base is the merge-base with `origin/HEAD`, then `main`, then `master`.
 - During an interview, type `hint` (first the file, then the region), `skip` (it comes back
   later), `stop` (end with a summary), or "I don't know", which beats guessing: you get the
   full explanation at no extra cost.

@@ -60,7 +60,7 @@ Add `--quick` or `--thorough` to `session start` only if the developer gave it (
 
 ## 4. Introduction
 
-Brief and specific: what this session covers (project mode: the next module; diff mode: the change and the code it affects, at the chosen intensity; mention open real findings or revisits if `open_findings` or `revisit_count` are non-zero). Then the commands: `hint` (a nudge: first the file, then the region), `skip` (move on; it comes back later), `stop` (end and summarize). Say that "I don't know" beats guessing: it gets a full explanation and costs nothing extra.
+Brief and specific: what this session covers (project mode: the next module; diff mode: the change and the code it affects, at the chosen intensity; mention open real findings or revisits if `open_findings` or `revisit_count` are non-zero). Say how it progresses: it starts with what the code is ("explain it"), moves to "what if" questions, then "spot the flaw", and ends with any real issues found in their code. Then the commands: `hint` (a nudge: first the file, then the region), `skip` (move on; it comes back later), `stop` (end and summarize). Say that "I don't know" beats guessing: it gets a full explanation and costs nothing extra.
 
 ## 5. Interview loop
 

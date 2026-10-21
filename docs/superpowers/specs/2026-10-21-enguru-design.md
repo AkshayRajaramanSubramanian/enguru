@@ -187,7 +187,8 @@ Regex redaction for common secret formats (cloud keys, `sk-`-style tokens, beare
 ## 7. Question bank
 
 ### 7.1 When it's built
-- **Project mode:** first the topic map (4–8 modules suited to the project, each with 3–6 concepts), then questions **for each module when that module starts**.
+- **Project mode:** first the topic map (4–8 modules suited to the project, each with 3–6 concepts), then questions **for each module when that module starts**. Modules go from the core definition outward: module 1 is what the project is and its core flow (purpose, entry points, main data path, key components); later modules are more specialized. Concepts within a module go from definitional to detailed.
+- **Every concept** (project, diff and revisit banks) gets at least one `explain_it` question at `foundational` (plus `intermediate` where useful) and, where the evidence supports it, a `what_if` and a `spot_the_flaw` or `review_diff`, so the progression in §9.1 has somewhere to go. Difficulty rises with the phase: explain foundational/intermediate, what-if intermediate, flaw/review intermediate/advanced.
 - **Diff mode:** risk-ranked concepts covering the change and its blast radius, with their questions, built in one pass. Risk order: auth, data writes, money and external calls first; then changed contracts; then untested paths.
 - **Revisits:** the analyst writes a **new question** on the same concept. An identical question is never repeated.
 
@@ -206,6 +207,8 @@ Regex redaction for common secret formats (cloud keys, `sk-`-style tokens, beare
 | Review real diff | Review judgment | Project mode: commits that later needed a fix (the fix is the key). Diff mode: the developer's own hunks plus blast-radius files |
 | Spot-the-flaw | Defect detection | A real snippet of 40 lines or fewer with one injected flaw from: missing await, removed auth check, unhandled null, off-by-one, swallowed exception, injection risk, race condition. Stores the original, the flawed version, the location and the category |
 | What-if | Systems thinking | Components that actually exist in the project (external APIs, data stores, queues) |
+
+The styles are also the interview's phases (§9.1): explain-it is phase 1, what-if phase 2, spot-the-flaw and review-diff phase 3. A concept with no grounded question for a phase skips that phase.
 
 ### 7.5 Validation (script, after each analyst run)
 - JSON schema check.
@@ -240,10 +243,12 @@ The plugin doesn't fix anything. On a later run, if a finding's evidence hashes 
 
 ### 9.1 Session start
 1. Startup checks (python version, lock file, staleness).
-2. Order of work:
-   - confirmed findings, critical first;
-   - then up to 2 items from the revisit queue;
-   - then the next unfinished concepts.
+2. Order of work (progressive: explain it → what if → spot the flaw → real findings):
+   - housekeeping: building banks, verifying new findings, fix checks;
+   - up to 2 items from the revisit queue, as warm-up (a finding explained by last resort keeps its slot but waits for the findings phase);
+   - **phase 1**, `explain_it`, across the session's concepts (project: the module's concepts in topic-map order; diff: the risk window), then **phase 2**, `what_if`, then **phase 3**, `spot_the_flaw` / `review_diff`. A concept enters phase p+1 only if its phase-p answer (this session or earlier) was correct or partial; a failed or skipped concept stops for this session. A concept with no question for a phase skips it.
+   - **real findings** last: a ladder stopped partway (in any scope) resumes at its saved rung, then open confirmed findings, critical first, then revisit ladders;
+   - then done. A session that stops before the findings phase still discloses open or in-progress critical findings (§9.5).
 3. A short introduction: what's covered, the available commands, and that "I don't know" is better than guessing.
 4. **Diff mode without `--quick` or `--thorough`:** the plugin asks once, and recommends **thorough** if the diff touches 10 or more files or any risk-tier-1 area.
 
@@ -253,11 +258,14 @@ The plugin doesn't fix anything. On a later run, if a finding's evidence hashes 
 | Quick | 5 concepts by risk; findings in the diff are always included in addition | Allowed; the concept goes to the revisit queue |
 | Thorough | Up to 2 questions per concept, at most 12 concepts. Concepts that don't fit are listed at the end | Allowed |
 
+Both intensities serve the window phase by phase (§9.1): quick asks each concept's earliest available phase; thorough's 2 questions are a concept's two earliest available phases (a concept that fails its first question gets its second in the same phase). Findings come after the quiz questions.
+
 ### 9.3 Context hygiene
 The interviewer only gets questions through `enguru.py next` and saves results through `enguru.py record`. It never loads the whole bank.
 
 ### 9.4 Quiz flow
-- **Starting difficulty:** intermediate, or foundational if this concept failed before.
+- **Difficulty:** within a phase, the easiest unasked question first (foundational, then intermediate, then advanced); after a failure on the concept it stays at the lowest difficulty available.
+- **Solid:** a concept is solid when it has a correct answer on the deepest phase it has questions for (correct on explain-it alone is not enough when what-if or flaw questions exist). A module is finished when all its concepts are solid, retired, or (findings) completed or fixed.
 - **Grading:** each must-have point is marked hit, partial or missed. A misconception the developer states outright counts against the answer more than an omission.
   - *Outcomes:* `correct | partial | incorrect | dont_know | skipped`
 - **Grading rules:**
@@ -406,6 +414,7 @@ A small sample vibe-coded app with real transcripts, run through project mode, q
 | Diff mode with quick/thorough chosen each time | Most real work is on existing codebases; fits both pre-merge checks and study sessions |
 | Haiku for semantic event extraction | Keyword rules miss polite or indirect pushback |
 | Per-module question generation | Unvisited modules cost nothing; answer keys match current code |
+| Progressive order (explain → what-if → spot-the-flaw → real findings) | User feedback: starting with deep questions was disorienting |
 | Guided discovery for real findings | Working out a real mistake yourself is remembered better than being told |
 | Verifier for findings | A false finding taught through guided discovery would be a lasting false lesson |
 | Mandatory disclosure of critical findings | The teaching method must never hide a real critical issue |
