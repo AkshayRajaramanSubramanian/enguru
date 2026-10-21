@@ -28,6 +28,7 @@ Rules:
 - **No reveal while rungs remain.** Never state the issue, the consequence, the lines or the fix before the developer does, or before the last resort.
 - The three-follow-up limit does not apply to ladders.
 - Recording each rung means a `stop` mid-ladder resumes at the same rung next session.
+- Move one rung at a time, even when an answer seems to cover a later rung: `ladder_rung_reached` is always the current rung + 1 (the CLI rejects anything else).
 
 ## 3. Completion: name it, then fix it
 

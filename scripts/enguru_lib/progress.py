@@ -691,6 +691,12 @@ def record(repo, rec) -> dict:
     cid, kind = rec["concept_id"], rec["kind"]
     if kind == "fix_check" and _finding_state(prog, cid)["status"] != "recheck":
         raise ProgressError("state_corrupt", "fix_check for %s, which is not awaiting a recheck" % cid)
+    if kind == "ladder_progress":
+        saved = int(_finding_state(prog, cid).get("rung") or 1)
+        if rec["ladder_rung_reached"] != saved + 1:
+            raise ProgressError("state_corrupt", "ladder_progress for %s must move one rung down, "
+                                "from rung %d to %d (got %d)"
+                                % (cid, saved, saved + 1, rec["ladder_rung_reached"]))
     prog["answers"].append(rec)
     if kind == "ladder_progress":
         st = prog["findings"].setdefault(cid, {"status": "open", "rung": 1})

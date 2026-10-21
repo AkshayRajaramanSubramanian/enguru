@@ -272,8 +272,9 @@ def test_revealed_finding_goes_to_revisit_queue_not_findings_first(tmp_path):
     repo, scope, s = start_diff(tmp_path, b)
     sid = s["session_id"]
     assert progress.next_item(repo)["concept_id"] == "f1"
-    progress.record(repo, rec(sid, "f1", None, "incorrect", kind="ladder_progress",
-                              qkind="finding", ladder_rung_reached=3, ladder_length=3))
+    for rung in (2, 3):
+        progress.record(repo, rec(sid, "f1", None, "incorrect", kind="ladder_progress",
+                                  qkind="finding", ladder_rung_reached=rung, ladder_length=3))
     r = finish_ladder(repo, sid, "f1", revealed=True)
     assert r == {"ok": True, "concept_status": "revisit"}
     p = load_progress(repo)
@@ -725,8 +726,9 @@ def test_skipped_finding_keeps_status_and_rung_and_is_not_served_again(tmp_path)
     b = make_bank(["c1"], [finding("f-crit", "critical", rungs=4)])
     repo, scope, s = start_diff(tmp_path, b)
     sid = s["session_id"]
-    progress.record(repo, rec(sid, "f-crit", None, "incorrect", kind="ladder_progress",
-                              qkind="finding", ladder_rung_reached=3, ladder_length=4))
+    for rung in (2, 3):
+        progress.record(repo, rec(sid, "f-crit", None, "incorrect", kind="ladder_progress",
+                                  qkind="finding", ladder_rung_reached=rung, ladder_length=4))
     r = progress.record(repo, rec(sid, "f-crit", None, "skipped", qkind="finding",
                                   ladder_rung_reached=3, ladder_length=4))
     assert r["concept_status"] == "in_progress"
@@ -906,3 +908,16 @@ def test_resume_marks_changed_finding_for_recheck(tmp_path):
     assert progress.next_item(repo)["question"]["concept_id"] == "a"
     st = load_progress(repo)["findings"]["d-f"]
     assert st["status"] == "recheck" and st["prev_status"] == "in_progress" and st["rung"] == 2
+
+
+def test_ladder_progress_moves_exactly_one_rung(tmp_path):
+    repo, scope, s = start_diff(tmp_path, make_bank(["c1"], [finding("f1", rungs=4)]))
+    sid = s["session_id"]
+    with pytest.raises(progress.ProgressError) as e:
+        progress.record(repo, rec(sid, "f1", None, "incorrect", kind="ladder_progress",
+                                  qkind="finding", ladder_rung_reached=4, ladder_length=4))
+    assert "from rung 1 to 2" in e.value.message
+    for rung in (2, 3):
+        progress.record(repo, rec(sid, "f1", None, "incorrect", kind="ladder_progress",
+                                  qkind="finding", ladder_rung_reached=rung, ladder_length=4))
+    assert load_progress(repo)["findings"]["f1"]["rung"] == 3
