@@ -155,11 +155,14 @@ def test_revisit_capped_at_two_per_session(tmp_path):
     s2 = restart(repo, scope)
     assert s2["revisit_count"] == 3
     served = []
-    for _ in range(3):
+    while True:
         item = progress.next_item(repo)
+        if item["action"] == "done":
+            break
         served.append(item["question"]["concept_id"])
         answer_ask(repo, s2["session_id"], item, "partial")
-    assert served == ["r1", "r2", "n1"]  # r3 waits: cap of 2 revisit items
+    assert served == ["r1", "r2", "n1"]  # r3 waits for a later session: cap of 2
+    assert item["uncovered"] == []
 
 
 def test_revisit_with_all_questions_asked_requests_rebuild(tmp_path):
@@ -373,9 +376,36 @@ def test_recommend_intensity():
 
 def test_lock_held_cli_error(tmp_path):
     repo = diff_repo(tmp_path)
-    progress.start_session(repo, digest.Scope("project"), None)  # lock held by this live process
+    first = run_cli(["session", "start", "--project"], repo)
     code, out = run_cli_raw(["session", "start", "--project"], repo)
     assert code == 2 and out["error"] == "lock_held"
+    assert first["session_id"] in out["message"] and "heartbeat" in out["message"]
+    second = run_cli(["session", "start", "--project", "--takeover"], repo)
+    assert second["session_id"] != first["session_id"]
+    lock = json.loads((Path(repo) / ".enguru" / "lock").read_text())
+    assert lock["session_id"] == second["session_id"] and lock["pid"] is None
+    run_cli(["session", "end"], repo)
+    assert not (Path(repo) / ".enguru" / "lock").exists()
+
+
+def test_heartbeat_refreshed_by_next_record_and_set_intensity(tmp_path):
+    repo, scope, s = start_diff(tmp_path, make_bank(["c1"]), intensity=None)
+    lockp = Path(repo) / ".enguru" / "lock"
+
+    def age_lock():
+        data = json.loads(lockp.read_text())
+        data["heartbeat"] = 0
+        lockp.write_text(json.dumps(data))
+
+    for call in (lambda: progress.set_intensity(repo, "quick"),
+                 lambda: progress.next_item(repo),
+                 lambda: progress.record(repo, rec(s["session_id"], "c1", "q-c1-1"))):
+        age_lock()
+        call()
+        assert json.loads(lockp.read_text())["heartbeat"] > 0
+    age_lock()  # an idle session whose heartbeat went stale can be reclaimed
+    s2 = progress.start_session(repo, scope, "quick")
+    assert s2["session_id"] != s["session_id"]
 
 
 def test_done_lists_uncovered_concepts_in_thorough(tmp_path):
@@ -547,3 +577,89 @@ def test_digest_prep_reuses_session_worktree_range_id(tmp_path):
     run_cli(["digest", "prep", "--diff", "--uncommitted", "--transcripts-root", str(tr)], repo)
     meta = json.loads((repo / ".enguru" / "work" / "rules.json").read_text())
     assert meta["scope"]["range_id"] == s["range_id"]
+
+
+def test_project_mode_revisit_capped(tmp_path):
+    repo = diff_repo(tmp_path)
+    pdir = Path(repo) / ".enguru" / "banks" / "project"
+    ids = ["a", "b", "c", "d"]
+    write_bank(pdir / "topic-map.json",
+               {"modules": [{"id": "m1", "title": "M1", "concepts": [concept(i) for i in ids]}]})
+    write_bank(pdir / "m1.json", make_bank(ids, per_concept=2, scope_key="project"))
+    s = progress.start_session(repo, digest.Scope("project"), None)
+    for cid in ("a", "b", "c"):
+        progress.record(repo, rec(s["session_id"], cid, "q-%s-1" % cid, "skipped", scope="project"))
+    s2 = restart(repo, digest.Scope("project"), None)
+    served = []
+    while True:
+        item = progress.next_item(repo)
+        if item["action"] == "done":
+            break
+        served.append(item["question"]["concept_id"])
+        answer_ask(repo, s2["session_id"], item, "partial", scope="project")
+    assert served == ["a", "b", "d"]
+
+
+def test_failed_rebuild_skips_concept_for_session(tmp_path):
+    repo, scope, s = start_diff(tmp_path, make_bank([("r1", 1), ("c2", 2)]))
+    answer_ask(repo, s["session_id"], progress.next_item(repo), "skipped")
+    restart(repo, scope)
+    assert progress.next_item(repo)["action"] == "rebuild_concept"
+    item = progress.next_item(repo)  # the analyst produced nothing new
+    assert item["action"] == "ask" and item["question"]["concept_id"] == "c2"
+    assert load_progress(repo)["current"]["skipped"] == {"r1": "rebuild_failed:revisit"}
+
+
+def test_record_requires_matching_current_session(tmp_path):
+    repo, scope, s = start_diff(tmp_path, make_bank(["c1"]))
+    with pytest.raises(progress.ProgressError) as e:
+        progress.record(repo, rec("s-other", "c1", "q-c1-1"))
+    assert e.value.code == "state_corrupt"
+    code, out = run_cli_raw(["record"], repo, stdin=json.dumps(rec("s-other", "c1", "q-c1-1")))
+    assert code == 2 and out["error"] == "state_corrupt"
+    progress.end_session(repo)
+    with pytest.raises(progress.ProgressError):
+        progress.record(repo, rec(s["session_id"], "c1", "q-c1-1"))
+
+
+def test_pending_findings_request_verification_first(tmp_path):
+    b = make_bank(["c1"], [finding("f1", verdict="pending"), finding("f2", verdict="pending")])
+    repo, scope, s = start_diff(tmp_path, b)
+    assert progress.next_item(repo) == {
+        "action": "verify_findings", "bank_path": ".enguru/banks/diff/%s.json" % scope.range_id,
+        "concept_ids": ["f1", "f2"]}
+    b["findings"] = [dict(b["findings"][0], verdict="confirmed")]
+    write_bank(diff_bank_path(repo, scope), b)
+    item = progress.next_item(repo)
+    assert item["action"] == "ladder" and item["concept_id"] == "f1"
+
+
+def test_module_with_completed_finding_concept_advances(tmp_path):
+    repo = diff_repo(tmp_path)
+    pdir = Path(repo) / ".enguru" / "banks" / "project"
+    write_bank(pdir / "topic-map.json", {"modules": [
+        {"id": "m1", "title": "M1", "concepts": [concept("a"), concept("f")]},
+        {"id": "m2", "title": "M2", "concepts": [concept("z", module="m2")]}]})
+    write_bank(pdir / "m1.json", make_bank(["a"], [finding("f")], scope_key="project"))
+    s = progress.start_session(repo, digest.Scope("project"), None)
+    assert s["module_id"] == "m1"
+    progress.record(repo, rec(s["session_id"], "a", "q-a-1", "correct", scope="project"))
+    assert progress.next_item(repo)["action"] == "ladder"
+    finish_ladder(repo, s["session_id"], "f")
+    assert progress.next_item(repo) == {"action": "done", "uncovered": []}
+    assert restart(repo, digest.Scope("project"), None)["module_id"] == "m2"
+
+
+def test_pending_cleared_by_answer_on_same_concept(tmp_path):
+    repo, scope, s = start_diff(tmp_path, make_bank(["c1", "c2"], per_concept=2))
+    assert progress.next_item(repo)["question"]["concept_id"] == "c1"
+    progress.record(repo, rec(s["session_id"], "c1", "q-other", "partial"))
+    assert progress.next_item(repo)["question"]["concept_id"] == "c2"
+
+
+def test_fix_check_rejected_unless_recheck(tmp_path):
+    repo, scope, s = start_diff(tmp_path, make_bank(["c1"], [finding("f1")]))
+    with pytest.raises(progress.ProgressError) as e:
+        progress.record(repo, rec(s["session_id"], "f1", kind="fix_check", qkind="finding",
+                                  fix_verdict="fixed"))
+    assert e.value.code == "state_corrupt"

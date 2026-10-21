@@ -1,6 +1,7 @@
 """Sessions, next-item selection, answer recording and keylog."""
 import json
 import re
+import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -111,10 +112,12 @@ def _current_session(prog):
     return None
 
 
-def _require_session(prog):
+def _require_session(repo, prog):
+    """Return the current session and refresh its lock heartbeat."""
     s = _current_session(prog)
     if s is None:
         raise ProgressError("state_corrupt", "No active session; run `session start` first.")
+    paths.touch_lock(paths.state_dir(repo), s["id"])
     return s
 
 
@@ -236,19 +239,20 @@ def _mark_staleness(repo, prog, idx):
 
 # ------------------------------------------------------------------ sessions
 
-def start_session(repo, scope, intensity, now=None) -> dict:
+def start_session(repo, scope, intensity, now=None, takeover=False) -> dict:
     repo = Path(repo)
     paths.ensure_gitignore(repo)
     sd = paths.state_dir(repo)
-    paths.acquire_lock(sd)
+    sid = "s%d-%s" % (len(load(repo)["sessions"]) + 1, secrets.token_hex(3))
+    paths.acquire_lock(sd, session_id=sid, force=takeover)
     try:
-        return _start(repo, scope, intensity, now or _now())
+        return _start(repo, scope, intensity, now or _now(), sid)
     except BaseException:
-        paths.release_lock(sd)
+        paths.release_lock(sd, sid)
         raise
 
 
-def _start(repo, scope, intensity, now):
+def _start(repo, scope, intensity, now, sid):
     recommended = None
     if scope.kind == "diff":
         try:
@@ -262,7 +266,7 @@ def _start(repo, scope, intensity, now):
     else:
         intensity = None
     prog = load(repo)
-    session = {"id": "s%d" % (len(prog["sessions"]) + 1), "scope": scope.kind,
+    session = {"id": sid, "scope": scope.kind,
                "range_id": scope.range_id if scope.kind == "diff" else None,
                "intensity": intensity, "module_id": None, "started": now, "ended": None}
     tm, module_banks, banks = _load_scope(repo, session)
@@ -271,7 +275,8 @@ def _start(repo, scope, intensity, now):
     session["module_id"] = _pick_module(prog, tm, module_banks)
     prog["sessions"].append(session)
     prog["current"] = {"session_id": session["id"], "served_concepts": [],
-                       "served_questions": {}, "revisit_served": [], "pending": None}
+                       "served_questions": {}, "revisit_served": [], "pending": None,
+                       "rebuilds": {}, "skipped": {}}
     _save(repo, prog)
     out = {"session_id": session["id"], "scope": scope.kind, "range_id": session["range_id"],
            "intensity": intensity}
@@ -289,7 +294,7 @@ def set_intensity(repo, intensity) -> dict:
     if intensity not in ("quick", "thorough"):
         raise ProgressError("state_corrupt", "intensity must be quick or thorough")
     prog = load(repo)
-    session = _require_session(prog)
+    session = _require_session(repo, prog)
     if session["scope"] != "diff":
         raise ProgressError("state_corrupt", "intensity applies to diff sessions only")
     session["intensity"] = intensity
@@ -329,11 +334,13 @@ def end_session(repo, now=None) -> dict:
     scored = sum(1 for a in prog["answers"]
                  if a["kind"] == "answer" and a.get("outcome") != "skipped"
                  and (since is None or a["timestamp"][:10] > since))
-    if prog["current"] and session:
+    current = prog["current"]
+    if current and session:
         session["ended"] = now or _now()
     prog["current"] = None
     _save(repo, prog)
-    paths.release_lock(paths.state_dir(repo))
+    if current:
+        paths.release_lock(paths.state_dir(repo), current["session_id"])
     return {"solid": solid, "revisit": list(prog["revisit"]),
             "undisclosed_critical": undisclosed, "scored_since_last_certificate": scored,
             "suggest_certificate": scored >= SUGGEST_CERTIFICATE_MIN}
@@ -348,7 +355,16 @@ def _build_action(action, out_rel, **extra):
     return out
 
 
-def _rebuild(prog, idx, cid, reason):
+def _rebuild(repo, prog, idx, cid, reason):
+    """Return a rebuild action, or None (and skip the concept for the session)
+    when this session already asked for one and it did not help."""
+    cur = prog["current"]
+    if cur["rebuilds"].get(cid, 0) >= 1:
+        cur["skipped"][cid] = "rebuild_failed:" + reason
+        _save(repo, prog)
+        return None
+    cur["rebuilds"][cid] = cur["rebuilds"].get(cid, 0) + 1
+    _save(repo, prog)
     return {"action": "rebuild_concept", "concept_id": cid, "reason": reason,
             "bank_path": idx["concepts"][cid]["bank"],
             "out_path": ".enguru/work/revisit-%s.json" % cid,
@@ -375,16 +391,18 @@ def _pick_question(prog, idx, cid):
 
 def _serve(repo, prog, idx, cid, revisit=False, allow_rebuild=True):
     """Return an ask/rebuild action for a concept, or None to skip it."""
+    if cid in prog["current"]["skipped"]:
+        return None
     stale, retired = bank.stale_concepts(repo, [idx["concepts"][cid]["concept"]])
     if retired:
         _retire(prog, cid)
         _save(repo, prog)
         return None
     if stale:
-        return _rebuild(prog, idx, cid, "stale")
+        return _rebuild(repo, prog, idx, cid, "stale")
     q = _pick_question(prog, idx, cid)
     if q is None:
-        return _rebuild(prog, idx, cid, "revisit") if allow_rebuild else None
+        return _rebuild(repo, prog, idx, cid, "revisit") if allow_rebuild else None
     cur = prog["current"]
     cur["pending"] = {"concept_id": cid, "question_id": q["id"]}
     if cid not in cur["served_concepts"]:
@@ -433,8 +451,10 @@ def _open_finding_concepts(prog, idx):
 def next_item(repo) -> dict:
     repo = Path(repo)
     prog = load(repo)
-    session = _require_session(prog)
+    session = _require_session(repo, prog)
     cur = prog["current"]
+    for k in ("rebuilds", "skipped"):
+        cur.setdefault(k, {})
     if session["scope"] == "project":
         if _read_bank(repo, TOPIC_REL) is None:
             return _build_action("build_topic_map", TOPIC_REL)
@@ -442,6 +462,10 @@ def next_item(repo) -> dict:
         return _build_action("build_diff_bank", _diff_rel(session["range_id"]),
                              range_id=session["range_id"])
     tm, module_banks, banks = _load_scope(repo, session)
+    for rel, b in banks:
+        pending = [f["concept_id"] for f in b.get("findings", []) if f.get("verdict") == "pending"]
+        if pending:
+            return {"action": "verify_findings", "bank_path": rel, "concept_ids": pending}
     idx = _index(tm, banks)
 
     pend = cur.get("pending")
@@ -479,6 +503,11 @@ def next_item(repo) -> dict:
     return _next_diff(repo, prog, session, idx, banks[0][1])
 
 
+def _held_for_revisit(prog, cid):
+    """A queued revisit concept is only served through the capped revisit step."""
+    return cid in prog["revisit"] and cid not in prog["current"]["revisit_served"]
+
+
 def _next_project(repo, prog, session, idx, tm, module_banks):
     cur = prog["current"]
     if session["module_id"] is None:
@@ -493,7 +522,7 @@ def _next_project(repo, prog, session, idx, tm, module_banks):
         entry = idx["concepts"].get(cid)
         if (entry is None or entry["concept"].get("kind") != "quiz"
                 or _concept_status(prog, cid) in ("solid", "retired")
-                or cid in cur["served_concepts"]):
+                or cid in cur["served_concepts"] or _held_for_revisit(prog, cid)):
             continue
         item = _serve(repo, prog, idx, cid)
         if item:
@@ -512,6 +541,7 @@ def _next_diff(repo, prog, session, idx, diff_bank):
     for _, c in ordered:
         cid, status = c["id"], _concept_status(prog, c["id"])
         if (c.get("kind") != "quiz" or status == "retired" or cid in cur["revisit_served"]
+                or _held_for_revisit(prog, cid)
                 or (status == "solid" and cid not in cur["served_concepts"])):
             continue
         candidates.append(cid)
@@ -555,8 +585,14 @@ def record(repo, rec) -> dict:
     if errs:
         raise ProgressError("state_corrupt", "invalid record: " + "; ".join(errs))
     prog = load(repo)
-    prog["answers"].append(rec)
+    session = _require_session(repo, prog)
+    if rec["session_id"] != session["id"]:
+        raise ProgressError("state_corrupt", "record is for session %s but the current session is %s"
+                            % (rec["session_id"], session["id"]))
     cid, kind = rec["concept_id"], rec["kind"]
+    if kind == "fix_check" and _finding_state(prog, cid)["status"] != "recheck":
+        raise ProgressError("state_corrupt", "fix_check for %s, which is not awaiting a recheck" % cid)
+    prog["answers"].append(rec)
     if kind == "ladder_progress":
         st = prog["findings"].setdefault(cid, {"status": "open", "rung": 1})
         st["status"] = "in_progress"
@@ -587,7 +623,7 @@ def record(repo, rec) -> dict:
         result = c["status"]
     cur = prog.get("current")
     if (cur and cur.get("pending") and kind == "answer"
-            and rec.get("question_id") == cur["pending"]["question_id"]):
+            and cid == cur["pending"]["concept_id"]):
         cur["pending"] = None
     _save(repo, prog)
     return {"ok": True, "concept_status": result}

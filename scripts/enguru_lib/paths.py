@@ -13,11 +13,28 @@ class StateCorrupt(Exception):
     pass
 
 
+def _fmt_time(t):
+    if not _is_num(t):
+        return "unknown"
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+
+
+def _is_num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
 class LockHeld(Exception):
-    def __init__(self, pid, started):
-        super().__init__("lock held by pid %s since %s" % (pid, started))
+    def __init__(self, pid, started, heartbeat=None, session_id=None):
+        if session_id is not None:
+            msg = "lock held by session %s since %s (last heartbeat %s)" % (
+                session_id, _fmt_time(started), _fmt_time(heartbeat))
+        else:
+            msg = "lock held by pid %s since %s" % (pid, _fmt_time(started))
+        super().__init__(msg)
         self.pid = pid
         self.started = started
+        self.heartbeat = heartbeat
+        self.session_id = session_id
 
 
 def state_dir(repo: Path) -> Path:
@@ -82,40 +99,87 @@ def _pid_alive(pid) -> bool:
     return True
 
 
-def acquire_lock(sd: Path, now=None) -> None:
+def _read_lock(lock):
+    try:
+        held = json.loads(Path(lock).read_text())
+    except (ValueError, OSError):
+        return None
+    return held if isinstance(held, dict) else None
+
+
+def _lock_stale(held, now) -> bool:
+    """Session locks (pid null) go stale by heartbeat age; PID locks by a dead PID or age."""
+    if held is None:
+        return True  # unreadable lock counts as stale
+    if held.get("pid") is None and "session_id" in held:
+        hb = held.get("heartbeat")
+        return not _is_num(hb) or now - hb > LOCK_STALE_SECONDS
+    pid, started = held.get("pid"), held.get("started")
+    return pid is None or not _is_num(started) or not _pid_alive(pid) or now - started > LOCK_STALE_SECONDS
+
+
+def _write_lock_file(lock, payload):
+    tmp = lock.with_name(lock.name + ".tmp")
+    tmp.write_text(json.dumps(payload))
+    os.replace(tmp, lock)
+
+
+def acquire_lock(sd: Path, now=None, session_id=None, force=False) -> None:
+    """Take the lock. With session_id it is a session lock (pid null, heartbeat);
+    otherwise it is tied to this process's PID. force reclaims a held lock."""
     sd = Path(sd)
     lock = sd / "lock"
     now = time.time() if now is None else now
-    payload = json.dumps({"pid": os.getpid(), "started": now})
+    if session_id is not None:
+        payload = {"pid": None, "session_id": session_id, "started": now, "heartbeat": now}
+    else:
+        payload = {"pid": os.getpid(), "started": now}
     for _ in range(2):
         try:
             fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
-            try:
-                held = json.loads(lock.read_text())
-                pid, started = held["pid"], held["started"]
-            except (ValueError, KeyError, TypeError, OSError):
-                pid, started = None, None  # unreadable lock counts as stale
-            stale = (
-                pid is None
-                or not _pid_alive(pid)
-                or now - started > LOCK_STALE_SECONDS
-            )
-            if not stale:
-                raise LockHeld(pid, started)
+            held = _read_lock(lock)
+            if not force and not _lock_stale(held, now):
+                raise LockHeld(held.get("pid"), held.get("started"), held.get("heartbeat"),
+                               held.get("session_id"))
             try:
                 lock.unlink()
             except FileNotFoundError:
                 pass
             continue
         with os.fdopen(fd, "w") as f:
-            f.write(payload)
+            f.write(json.dumps(payload))
         return
     raise LockHeld(None, None)
 
 
-def release_lock(sd: Path) -> None:
+def touch_lock(sd: Path, session_id, now=None) -> None:
+    """Refresh a session lock's heartbeat; re-create it if missing.
+    Raises LockHeld if another session holds it."""
+    lock = Path(sd) / "lock"
+    now = time.time() if now is None else now
+    held = _read_lock(lock)
+    if held is None or not lock.exists():
+        acquire_lock(sd, now=now, session_id=session_id)
+        return
+    if held.get("session_id") != session_id:
+        if not _lock_stale(held, now):
+            raise LockHeld(held.get("pid"), held.get("started"), held.get("heartbeat"),
+                           held.get("session_id"))
+        acquire_lock(sd, now=now, session_id=session_id, force=True)
+        return
+    held["heartbeat"] = now
+    _write_lock_file(lock, held)
+
+
+def release_lock(sd: Path, session_id=None) -> None:
+    """Remove the lock; with session_id, only if that session holds it."""
+    lock = Path(sd) / "lock"
+    if session_id is not None:
+        held = _read_lock(lock)
+        if held is None or held.get("session_id") != session_id:
+            return
     try:
-        (Path(sd) / "lock").unlink()
+        lock.unlink()
     except FileNotFoundError:
         pass

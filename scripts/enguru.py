@@ -156,7 +156,8 @@ def _progress_call(fn, *a):
     except digest.DigestError as e:
         fail(e.code, e.message)
     except paths.LockHeld as e:
-        fail("lock_held", "Another enguru session is running (%s)." % e)
+        fail("lock_held", "Another enguru session is running (%s). "
+             "Run `session start --takeover` to take it over." % e)
     except paths.StateCorrupt as e:
         fail("state_corrupt", str(e))
 
@@ -173,7 +174,7 @@ def cmd_session_start(args):
     repo = _repo_root(os.getcwd())
     intensity = "quick" if args.quick else "thorough" if args.thorough else None
     scope = _progress_call(digest.resolve_scope, repo, not args.diff, args.range, args.uncommitted)
-    emit(_progress_call(progress.start_session, repo, scope, intensity))
+    emit(_progress_call(progress.start_session, repo, scope, intensity, None, args.takeover))
 
 
 def cmd_session_end(args):
@@ -252,6 +253,7 @@ def build_parser():
     sint = ss.add_mutually_exclusive_group()
     sint.add_argument("--quick", action="store_true")
     sint.add_argument("--thorough", action="store_true")
+    ss.add_argument("--takeover", action="store_true", help="reclaim a lock held by another session")
     ss.set_defaults(func=cmd_session_start)
     se.add_parser("end", help="end the session").set_defaults(func=cmd_session_end)
     si = se.add_parser("set-intensity", help="choose diff intensity")

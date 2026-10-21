@@ -14,6 +14,7 @@ from enguru_lib.paths import (
     read_json,
     release_lock,
     state_dir,
+    touch_lock,
 )
 
 
@@ -86,3 +87,34 @@ def test_gitignore_appends_to_existing_without_newline(tmp_path):
     (tmp_path / ".gitignore").write_text("node_modules")
     assert ensure_gitignore(tmp_path) is True
     assert (tmp_path / ".gitignore").read_text() == "node_modules\n.enguru/\n"
+
+
+def test_non_numeric_started_counts_as_stale(tmp_path):
+    (tmp_path / "lock").write_text(json.dumps({"pid": os.getpid(), "started": "yesterday"}))
+    acquire_lock(tmp_path)
+
+
+def test_session_lock_held_until_heartbeat_stale(tmp_path):
+    acquire_lock(tmp_path, now=100.0, session_id="s1")
+    data = json.loads((tmp_path / "lock").read_text())
+    assert data == {"pid": None, "session_id": "s1", "started": 100.0, "heartbeat": 100.0}
+    with pytest.raises(LockHeld) as e:
+        acquire_lock(tmp_path, now=100.0 + LOCK_STALE_SECONDS, session_id="s2")
+    assert e.value.session_id == "s1" and e.value.heartbeat == 100.0
+    assert "1970-01-01T00:01:40Z" in str(e.value) and "heartbeat" in str(e.value)
+    touch_lock(tmp_path, "s1", now=5000.0)
+    with pytest.raises(LockHeld):
+        acquire_lock(tmp_path, now=5000.0 + LOCK_STALE_SECONDS, session_id="s2")
+    acquire_lock(tmp_path, now=5001.0 + LOCK_STALE_SECONDS, session_id="s2")
+    assert json.loads((tmp_path / "lock").read_text())["session_id"] == "s2"
+
+
+def test_session_lock_force_and_release_by_owner(tmp_path):
+    acquire_lock(tmp_path, session_id="s1")
+    acquire_lock(tmp_path, session_id="s2", force=True)
+    with pytest.raises(LockHeld):
+        touch_lock(tmp_path, "s1")
+    release_lock(tmp_path, "s1")
+    assert (tmp_path / "lock").exists()
+    release_lock(tmp_path, "s2")
+    assert not (tmp_path / "lock").exists()
