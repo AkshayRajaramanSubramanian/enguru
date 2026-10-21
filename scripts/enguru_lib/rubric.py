@@ -1,5 +1,6 @@
 """Deterministic answer scores and skill levels. All numbers come from config/rubric.json."""
 import json
+from fractions import Fraction
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -129,18 +130,18 @@ def _senior_unmet(items, cfg):
     for r in recs:
         if r.get("question_kind") == "finding":
             rung, ln = _finding_rung(r)
-            fr.append(1.0 if r.get("revealed") else rung / ln)
-    if fr and sum(fr) / len(fr) > 0.5:
+            fr.append(Fraction(1) if r.get("revealed") else Fraction(rung, ln))
+    if fr and sum(fr) * 2 > len(fr):
         unmet.append("findings need an average ladder rung of at most half the ladder (now %.0f%%)"
-                     % (sum(fr) / len(fr) * 100))
+                     % (float(sum(fr)) / len(fr) * 100))
     return unmet
 
 
 def _skill_level(items, cfg):
     lv = cfg["levels"]
     n = len(items)
-    pct = round(_pct(items, cfg), 4) if n else 0.0
-    out = {"scored": n, "weighted_pct": pct}
+    pct = _pct(items, cfg) if n else 0.0
+    out = {"scored": n, "weighted_pct": round(pct, 4)}
     if n < lv["min_rated"]:
         k = lv["min_rated"] - n
         out.update(level="not_yet_rated",

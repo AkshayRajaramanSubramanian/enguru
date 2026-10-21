@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -62,26 +63,16 @@ def test_finding_counts_for_two_skills():
     assert out["comprehension"]["level"] == "not_yet_rated"
 
 
-def pct_records(n, pct_correct_partial):
-    """n foundational records whose weighted pct is exactly as requested via partial/correct mix."""
-    return None
-
-
 def test_levels_boundaries():
     assert level([mk(i) for i in range(5)])["level"] == "not_yet_rated"
     assert "needs 1 more scored answer" in level([mk(i) for i in range(5)])["reasons"][0]
-    # 6 records: 3 correct (1) + 3 partial(0.5) => 75%; need 49.9 / 50.
-    # use scores via multipliers: 6 records, total = 2.994 -> 49.9%
-    r = [mk(i, hints_used=0) for i in range(6)]
-    for x in r[:2]:
-        x["outcome"] = "correct"
-    for x in r[2:]:
-        x["outcome"] = "incorrect"
-    # 2/6 = 33% -> novice
+    # 2 correct + 4 incorrect = 33% -> novice
+    r = [mk(i, outcome="correct" if i < 2 else "incorrect") for i in range(6)]
     assert level(r)["level"] == "novice"
+    # 3 correct + 3 incorrect = exactly 50% -> developing
     r = [mk(i, outcome="correct" if i < 3 else "incorrect") for i in range(6)]
     assert level(r)["level"] == "developing" and level(r)["weighted_pct"] == 50.0
-    # 49.9%: 1000 weight units is impractical; use custom cfg weights instead
+    # six partial answers: 49.9% with partial=0.499, exactly 50% with partial=0.5
     cfg = json.loads(json.dumps(CFG))
     cfg["base"]["partial"] = 0.499
     r = [mk(i, outcome="partial") for i in range(6)]
@@ -173,6 +164,25 @@ def test_senior_blocked_by_advanced_pct_and_finding_rung():
     assert lv["level"] != "senior_ready"
 
 
+def test_senior_blocked_only_by_finding_rung_average():
+    def fs(blocker):
+        out = []
+        for i in range(15):
+            d = "advanced" if i < 3 else "intermediate" if i < 6 else "foundational"
+            out.append(finding(i, 1, 2, difficulty=d, scope="diff", range_id="ab"[i % 2]))
+        out[14].update(scope="project", range_id=None)
+        if blocker:
+            out[14].update(ladder_rung_reached=2)  # rung/len 1.0 -> average 8/15 > 0.5
+        return out
+
+    ok = rubric.skill_levels(fs(False), CFG)["review_judgment"]  # average exactly 0.5
+    assert ok["level"] == "senior_ready"
+    blocked = rubric.skill_levels(fs(True), CFG)["review_judgment"]
+    assert blocked["level"] == "proficient"
+    assert blocked["weighted_pct"] > 90
+    assert len(blocked["reasons"]) == 1 and "ladder rung" in blocked["reasons"][0]
+
+
 def test_window_drops_old_failures():
     old = [mk(i, outcome="incorrect") for i in range(10)]
     new = [mk(100 + i) for i in range(20)]
@@ -185,7 +195,10 @@ def test_level_drop():
     r = prof_records(10)
     assert level(r)["level"] == "proficient"
     bad = [mk(200 + i, outcome="incorrect") for i in range(10)]
-    assert level(r + bad)["level"] in ("novice", "developing")
+    # window of 20: 10 good (weight 12.5) + 10 incorrect foundational -> 55.6% -> developing
+    lv = level(r + bad)
+    assert lv["level"] == "developing"
+    assert lv["weighted_pct"] == pytest.approx(55.5556, abs=1e-3)
 
 
 def test_skipped_not_scored():
@@ -211,17 +224,20 @@ def test_cli_cert_levels(tmp_path):
         {"concept_id": "f2", "verdict": "confirmed", "severity": "minor", "ladder": ["a", "b"]}]})
     _write(sd / "certificates" / "2020-01-01.json", {"date": "2020-01-01", "skills": {"comprehension": {"level": "novice"}}})
     out = run_cli(["cert", "levels"], tmp_path)
-    assert out["skills"]["comprehension"]["level"] == "proficient" or out["skills"]["comprehension"]["scored"] == 6
+    assert out["skills"]["comprehension"]["scored"] == 6
+    assert out["skills"]["comprehension"]["level"] == "developing"
     assert out["previous"] == {"comprehension": {"level": "novice"}}
     assert out["scopes"] == {"project": False, "diff_ranges": ["r0", "r1"]}
     assert {"concept_id": "f1", "status": "in_progress", "rung": 2, "ladder_length": 3} in out["findings"]
     assert out["revisit_count"] == 1
     assert out["open_critical"] == 1
-    assert not list((sd / "certificates").glob("2026*"))
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    assert not (sd / "certificates" / (today + ".json")).exists()
     out = run_cli(["cert", "levels", "--save"], tmp_path)
     saved = list((sd / "certificates").glob("*.json"))
     assert len(saved) == 2
-    new = [p for p in saved if p.name != "2020-01-01.json"][0]
+    new = sd / "certificates" / (today + ".json")
+    assert new in saved
     data = json.loads(new.read_text())
     assert data["date"] == new.stem and data["skills"] == out["skills"]
     out2 = run_cli(["cert", "levels", "--save"], tmp_path)
