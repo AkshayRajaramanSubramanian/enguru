@@ -167,9 +167,11 @@ def validate_bank(repo, bank: dict, digest: dict) -> list:
         concepts, questions, findings = bank["concepts"], bank["questions"], bank["findings"]
 
     # Ids end up in work-file names and shell arguments (rm -f, --ids, --out).
+    # An unsafe id is never echoed as item_id (callers pass item ids to shell commands),
+    # so it is always a whole-file problem ("$").
     def safe(item_id, value, what):
         if not paths.safe_id(value):
-            add(item_id, "unsafe id in %s: %r (letters, digits, . _ - only; no ..)"
+            add("$", "unsafe id in %s: %r (letters, digits, . _ - only; no ..)"
                 % (what, value))
 
     for m in bank.get("modules", []) if topic else []:

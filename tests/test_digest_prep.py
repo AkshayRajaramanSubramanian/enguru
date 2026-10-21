@@ -234,9 +234,11 @@ def test_enguru_interview_sessions_excluded(tmp_path):
         assistant([_tu("Bash", command='python3 "/x/enguru/scripts/enguru.py" session start --project')],
                   cwd=c, session_id="quiz2")])
     out = _prep(r, root)
-    assert [p["chunk_id"] for p in out["pending"]] == ["work__0"]
+    # quiz is wholly enguru (dropped); quiz2 keeps its turn before the first enguru turn.
+    assert sorted(p["chunk_id"] for p in out["pending"]) == ["quiz2__0", "work__0"]
     rules = _rules(r)
-    assert rules["sessions_found"] == 3 and rules["sessions_used"] == 1
+    assert rules["sessions_found"] == 3 and rules["sessions_used"] == 2
+    assert "sessions:enguru_cut:2" in rules["truncation"]
 
 
 def test_diff_hunk_lines_redacted(tmp_path):
@@ -246,3 +248,23 @@ def test_diff_hunk_lines_redacted(tmp_path):
     lines = _rules(r)["diff"]["hunks"][0]["lines"]
     assert "abcdefghijklmnop" not in json.dumps(lines)
     assert any("[REDACTED]" in l for l in lines)
+
+
+def test_enguru_session_truncated_at_first_enguru_turn(tmp_path):
+    r = make_repo(tmp_path, [{"a.py": "x = 1\n"}], ["init"])
+    root = tmp_path / "tx"
+    enc = transcripts.encode_project_dir(r)
+    c = str(r)
+    write_transcript(root, enc, "mixed", [
+        user("please add a feature", cwd=c, session_id="mixed"),
+        user("<command-name>/enguru:interview</command-name>", cwd=c, session_id="mixed"),
+        user("secret quiz answer", cwd=c, session_id="mixed")])
+    write_transcript(root, enc, "allquiz", [
+        user("<command-name>/enguru:interview</command-name>", cwd=c, session_id="allquiz")])
+    out = _prep(r, root)
+    assert [p["chunk_id"] for p in out["pending"]] == ["mixed__0"]
+    assert "secret quiz answer" not in json.dumps(
+        json.loads((r / ".enguru/work/chunks/mixed__0.json").read_text()))
+    rules = _rules(r)
+    assert rules["sessions_used"] == 1
+    assert "sessions:enguru_cut:2" in rules["truncation"]

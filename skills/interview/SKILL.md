@@ -87,6 +87,7 @@ The concept's code changed (`reason: stale`) or its questions are used up (`reas
 2. If there are problems, re-dispatch the analyst **once** with the same prompt plus: "Your previous output at out_path failed validation. Fix these items and rewrite the whole file:" followed by the problem list. Validate again.
 3. Still failing:
    - Only problems on specific ids (not `$`), in a bank (not a topic map): `enguru bank drop <out_path> --ids id1,id2`, then validate again; it must now pass.
+   - Only pass ids to `bank drop` that were reported as item problems, never `$` (the CLI refuses unsafe ids).
    - Whole-file problems (`$`, missing file, invalid JSON), a topic map with problems, or problems left after the drop: give up.
 
 The analyst only ever writes work files, so nothing reaches a live bank, and no question reaches the developer, without passing validation.

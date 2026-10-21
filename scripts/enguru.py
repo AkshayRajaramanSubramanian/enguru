@@ -165,12 +165,15 @@ def cmd_bank_seal(args):
 
 
 def cmd_bank_drop(args):
-    from enguru_lib import bank
+    from enguru_lib import bank, paths
     repo = _repo_root(os.getcwd())
     path = _bank_path(repo, args.path)
     _inside_state(repo, path, "bank path")
     _load_bank_shaped(path)
     ids = [i for i in args.ids.split(",") if i]
+    bad = [i for i in ids if not paths.safe_id(i)]
+    if bad:
+        fail("state_corrupt", "refusing unsafe id(s) for drop: %r" % bad)
     bank.drop_items(path, ids)
     emit({"ok": True, "dropped": ids})
 

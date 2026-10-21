@@ -2,7 +2,7 @@
 import json
 import re
 import shutil
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace as dc_replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -221,9 +221,15 @@ def prep(repo, scope, root):
 
     sessions, skipped = transcripts.load_sessions(repo, root)
     relevant = []
+    enguru_cut = 0
     for s in sessions:
-        if transcripts.is_enguru_session(s):
-            continue
+        cut = transcripts.enguru_cut_index(s)
+        if cut is not None:
+            # Keep the coding history before the first enguru turn; drop it and the rest.
+            enguru_cut += 1
+            s = dc_replace(s, turns=s.turns[:cut])
+            if not s.turns:
+                continue
         if changed_paths is not None:
             overlap = any(transcripts.edited_files(t, repo) & changed_paths for t in s.turns)
             in_window = window is not None and any(
@@ -236,7 +242,7 @@ def prep(repo, scope, root):
     limits = load_limits()
     relevant.sort(key=lambda s: max((_ts_key(t.timestamp) for t in s.turns), default=_MIN_TS),
                   reverse=True)
-    truncation = []
+    truncation = ["sessions:enguru_cut:%d" % enguru_cut] if enguru_cut else []
     if len(relevant) > limits["max_sessions"]:
         truncation.append("sessions:capped:%d/%d" % (limits["max_sessions"], len(relevant)))
         relevant = relevant[:limits["max_sessions"]]

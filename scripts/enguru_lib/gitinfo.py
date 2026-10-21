@@ -2,6 +2,7 @@
 import fnmatch
 import os
 import re
+import stat
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -151,7 +152,17 @@ def _is_generated(path):
 _HUNK_HDR = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
-EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # SHA-1 fallback
+
+
+def empty_tree(repo) -> str:
+    """The empty tree's id in the repo's hash format (SHA-256 repos differ)."""
+    try:
+        code, out = _git(repo, "hash-object", "-t", "tree", "/dev/null", check=False)
+    except OSError:
+        return EMPTY_TREE
+    out = out.strip()
+    return out if code == 0 and out else EMPTY_TREE
 UNTRACKED_MAX_LINES = 500
 UNTRACKED_MAX_BYTES = 1024 * 1024
 
@@ -164,7 +175,7 @@ def has_commits(repo) -> bool:
 def _diff_range_args(repo, base, head, uncommitted):
     if uncommitted:
         # Worktree against HEAD; with no commits yet, against the empty tree.
-        return ["HEAD" if has_commits(repo) else EMPTY_TREE]
+        return ["HEAD" if has_commits(repo) else empty_tree(repo)]
     return ["%s..%s" % (base, head or "HEAD")]
 
 
@@ -205,6 +216,8 @@ def _untracked_hunks(repo, start, excluded):
             continue
         full = os.path.join(str(repo), path)
         try:
+            if not stat.S_ISREG(os.lstat(full).st_mode):
+                continue  # symlinks, sockets, fifos, directories
             size = os.path.getsize(full)
             with open(full, "rb") as fh:
                 data = b"" if size > UNTRACKED_MAX_BYTES else fh.read()

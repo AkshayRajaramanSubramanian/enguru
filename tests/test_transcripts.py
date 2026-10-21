@@ -95,3 +95,18 @@ def test_edited_files_relative(tmp_path, repo):
         ], cwd=repo)])
     sessions, _ = T.load_sessions(repo, root)
     assert T.edited_files(sessions[0].turns[0], repo) == {"src/a.py", "b.py", "n.ipynb"}
+
+
+
+def test_enguru_cut_index():
+    def turn(i, role, text, tool_uses=()):
+        return T.Turn(id=str(i), session_id="s", timestamp="", role=role, text=text,
+                      tool_uses=list(tool_uses))
+    cli = T.ToolUse("Bash", {"command": 'python3 "/p/scripts/enguru.py" next'})
+    s = T.Session("s", None, "h", [turn(0, "user", "hi"), turn(1, "assistant", "ok", [cli]),
+                                    turn(2, "user", "later")])
+    assert T.enguru_cut_index(s) == 1
+    assert T.is_enguru_session(s)
+    clean = T.Session("s", None, "h", [turn(0, "user", "hi")])
+    assert T.enguru_cut_index(clean) is None
+    assert not T.is_enguru_session(clean)

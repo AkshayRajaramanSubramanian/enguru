@@ -170,3 +170,19 @@ def test_uncommitted_in_repo_without_commits(tmp_path):
     (r / "loose.py").write_text("b = 2\n")
     hunks, _ = gitinfo.diff_hunks(r, None, None, True)
     assert {h.path: h.lines for h in hunks} == {"staged.py": ["+a = 1"], "loose.py": ["+b = 2"]}
+
+
+def test_untracked_symlinks_skipped(tmp_path):
+    import os
+    r = make_repo(tmp_path, [{"a.py": "one\n"}], ["c1"])
+    (r / "real.py").write_text("b = 2\n")
+    os.symlink("real.py", r / "link.py")
+    os.symlink("/etc/hostname", r / "outside.txt")
+    hunks, _ = gitinfo.diff_hunks(r, None, None, True)
+    assert [h.path for h in hunks] == ["real.py"]
+
+
+def test_empty_tree_computed_from_git(tmp_path):
+    r = make_repo(tmp_path, [], [])
+    assert gitinfo.empty_tree(r) == gitinfo.EMPTY_TREE
+    assert gitinfo.empty_tree(tmp_path / "nonexistent") == gitinfo.EMPTY_TREE

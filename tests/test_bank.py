@@ -368,7 +368,7 @@ def test_unsafe_ids_rejected(tmp_path):
         b["findings"][0]["concept_id"] = bad
         ids = {p["item_id"] for p in bank.validate_bank(repo, b, {"events": []})
                if "unsafe id" in p["reason"]}
-        assert bad in ids, bad
+        assert ids == {"$"}, bad
         b = base_bank()
         b["questions"][0]["id"] = bad
         assert any("unsafe id" in p["reason"] for p in bank.validate_bank(repo, b, {"events": []}))
@@ -397,3 +397,14 @@ def test_mutating_bank_commands_stay_inside_state_dir(tmp_path):
         assert code == 2 and out["error"] == "state_corrupt" and ".enguru" in out["message"], args
     assert json.loads((repo / "ok.json").read_text()) == base_bank()
     assert not (tmp_path / "out.json").exists()
+
+
+def test_bank_drop_refuses_unsafe_ids(tmp_path):
+    repo = mk(tmp_path)
+    bp = repo / ".enguru" / "ok.json"
+    bp.parent.mkdir()
+    bp.write_text(json.dumps(base_bank()))
+    before = bp.read_text()
+    code, out = run_cli_raw(["bank", "drop", str(bp), "--ids", "q1,a;rm -rf ~"], repo)
+    assert code == 2 and out["error"] == "state_corrupt"
+    assert bp.read_text() == before

@@ -148,16 +148,20 @@ _ENGURU_CLI = re.compile(
 _ENGURU_SKILL = re.compile(r"<command-name>/?enguru:(?:interview|certificate)\b")
 
 
-def is_enguru_session(session: Session) -> bool:
-    """True for the developer's own enguru interview/certificate sessions, which are
-    not coding history and must not feed the digest."""
-    for t in session.turns:
+def enguru_cut_index(session: Session):
+    """Index of the first turn of the developer's own enguru interview/certificate
+    activity (not coding history), or None when the session has none."""
+    for i, t in enumerate(session.turns):
         if t.role == "user" and _ENGURU_SKILL.search(t.text):
-            return True
+            return i
         for tu in t.tool_uses:
             if tu.name == "Bash" and _ENGURU_CLI.search(str(tu.input.get("command", ""))):
-                return True
-    return False
+                return i
+    return None
+
+
+def is_enguru_session(session: Session) -> bool:
+    return enguru_cut_index(session) is not None
 
 
 def edited_files(turn: Turn, repo: Path) -> Set[str]:
