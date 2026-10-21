@@ -179,3 +179,53 @@ def test_cli_merge(tmp_path):
     out = run_cli(["digest", "merge"], r)
     assert out["ok"] is True and set(out) == {"ok", "events_kept", "events_dropped",
                                               "fallback_chunks", "truncation"}
+
+
+def _file_map(n):
+    files = [{"path": "src/pkg%d/module_%04d.py" % (i % 40, i), "size": 1000 + i}
+             for i in range(n)]
+    files.append({"path": "app.py", "size": 10})
+    return {"files": files, "stack": ["pyproject.toml"], "entry_points": ["app.py"]}
+
+
+def test_budget_caps_large_file_map_and_keeps_events():
+    d = _big(40, 200)
+    d["file_map"] = _file_map(1600)
+    d["git"] = {"churn_files": [["src/pkg3/module_0003.py", 50]]}
+    out = digest.apply_budget(d)
+    assert schema.validate(out, schema.load_schema("digest")) == []
+    assert len(json.dumps(out)) / 4 <= 20000
+    assert len(out["events"]) == 40 and out["meta"]["events_kept"] == 40
+    fm = out["file_map"]
+    kept = {f["path"] for f in fm["files"]}
+    assert "app.py" in kept and "src/pkg3/module_0003.py" in kept  # entry point, churn
+    assert any(t.startswith("file_map:capped:") for t in out["meta"]["truncation"])
+    n_kept = int(next(t for t in out["meta"]["truncation"]
+                      if t.startswith("file_map:capped:")).split(":")[2].split("/")[0])
+    assert n_kept == len(fm["files"]) and n_kept < 1601
+    assert sum(fm["file_counts"]["by_dir"].values()) == 1601 - n_kept
+    assert sum(fm["file_counts"]["by_ext"].values()) == 1601 - n_kept
+
+
+def test_budget_caps_large_diff_hunks_and_keeps_events():
+    d = _big(40, 200)
+    d["diff"] = {"hunks": [{"id": "h-%d" % i, "path": "f%d.py" % i, "old_start": 1, "new_start": 1,
+                            "lines": ["+line %d of a long generated hunk body" % j
+                                      for j in range(400)]} for i in range(12)],
+                 "excluded": [], "blast_radius_candidates": []}
+    out = digest.apply_budget(d)
+    assert schema.validate(out, schema.load_schema("digest")) == []
+    assert len(json.dumps(out)) / 4 <= 20000
+    assert len(out["events"]) == 40
+    hunks = out["diff"]["hunks"]
+    assert [h["id"] for h in hunks][:1] == ["h-0"]
+    assert any(t.startswith("hunks:") for t in out["meta"]["truncation"])
+    assert any("truncated" in h["lines"][-1] for h in hunks)
+
+
+def test_budget_drop_oldest_is_linear(monkeypatch):
+    calls = []
+    real = digest._size
+    monkeypatch.setattr(digest, "_size", lambda d: calls.append(1) or real(d))
+    digest.apply_budget(_big(2000), cap_tokens=60000)
+    assert len(calls) < 50

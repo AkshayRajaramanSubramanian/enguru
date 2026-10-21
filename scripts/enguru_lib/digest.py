@@ -298,6 +298,105 @@ def _size(digest):
     return len(json.dumps(digest)) / 4
 
 
+# Structural parts (file map, diff) are capped first, to these shares of the budget,
+# so the events still have room on medium and large repos.
+FILE_MAP_SHARE = 0.25
+DIFF_SHARE = 0.35
+HUNK_LINE_STAGES = (60, 20, 8)
+BLAST_CANDIDATES_CAP = 100
+
+
+def _json_tokens(obj):
+    return len(json.dumps(obj)) / 4
+
+
+def _file_counts(files):
+    by_dir, by_ext = {}, {}
+    for f in files:
+        p = f["path"]
+        d = p.split("/", 1)[0] + "/" if "/" in p else "./"
+        name = p.rsplit("/", 1)[-1]
+        ext = "." + name.rsplit(".", 1)[1] if "." in name.lstrip(".") else "(none)"
+        by_dir[d] = by_dir.get(d, 0) + 1
+        by_ext[ext] = by_ext.get(ext, 0) + 1
+    return {"by_dir": by_dir, "by_ext": by_ext}
+
+
+def _cap_file_map(digest, budget, trunc):
+    """Keep entry points, then the most churned, then the largest files; summarise the
+    rest as counts by top-level directory and extension."""
+    fm = digest.get("file_map")
+    if not isinstance(fm, dict) or not isinstance(fm.get("files"), list):
+        return
+    if _json_tokens(fm) <= budget:
+        return
+    files = fm["files"]
+    entry = set(fm.get("entry_points") or [])
+    churn = {}
+    for i, item in enumerate((digest.get("git") or {}).get("churn_files") or []):
+        if isinstance(item, (list, tuple)) and item:
+            churn.setdefault(item[0], i)
+
+    def rank(f):
+        p = f.get("path")
+        return (0 if p in entry else 1 if p in churn else 2,
+                churn.get(p, 0), -(f.get("size") or 0), str(p))
+
+    ordered = sorted(files, key=rank)
+    # Size of the kept list grows monotonically: one pass to find how many fit.
+    base = dict(fm, files=[], file_counts=_file_counts(files))
+    room = (budget - _json_tokens(base)) * 4
+    n = 0
+    for f in ordered:
+        room -= len(json.dumps(f)) + 2
+        if room < 0:
+            break
+        n += 1
+    kept, rest = ordered[:n], ordered[n:]
+    kept.sort(key=lambda f: str(f.get("path")))
+    fm["files"] = kept
+    fm["file_counts"] = _file_counts(rest)
+    trunc.append("file_map:capped:%d/%d" % (len(kept), len(files)))
+
+
+def _cap_diff(digest, budget, trunc):
+    """Cap blast-radius candidates, then shorten long hunks, then drop trailing hunks."""
+    diff = digest.get("diff")
+    if not isinstance(diff, dict) or _json_tokens(diff) <= budget:
+        return
+    cands = diff.get("blast_radius_candidates") or []
+    if len(cands) > BLAST_CANDIDATES_CAP:
+        diff["blast_radius_candidates"] = cands[:BLAST_CANDIDATES_CAP]
+        trunc.append("blast:capped:%d/%d" % (BLAST_CANDIDATES_CAP, len(cands)))
+        if _json_tokens(diff) <= budget:
+            return
+    hunks = diff.get("hunks") or []
+    for limit in HUNK_LINE_STAGES:
+        cut = 0
+        for h in hunks:
+            lines = h.get("lines") or []
+            if len(lines) > limit + 1:
+                extra = len(lines) - limit
+                if lines[-1].startswith("…"):  # already truncated at a looser stage
+                    extra += int(re.search(r"\d+", lines[-1]).group()) - 1
+                h["lines"] = lines[:limit] + ["… [%d more lines truncated]" % extra]
+                cut += 1
+        if cut:
+            trunc.append("hunks:lines:%d" % limit)
+        if _json_tokens(diff) <= budget:
+            return
+    total = len(hunks)
+    room = (budget - _json_tokens(dict(diff, hunks=[]))) * 4
+    n = 0
+    for h in hunks:
+        room -= len(json.dumps(h)) + 2
+        if room < 0:
+            break
+        n += 1
+    diff["hunks"] = hunks[:n]
+    trunc.append("hunks:dropped:%d/%d" % (total - n, total))
+
+
 def apply_budget(digest, cap_tokens=20000):
     """Trim the digest until it fits, recording each stage used in meta.truncation."""
     meta = digest.setdefault("meta", {})
@@ -308,6 +407,10 @@ def apply_budget(digest, cap_tokens=20000):
             meta["events_kept"] = len(digest["events"])
         return digest
 
+    if _size(digest) <= cap_tokens:
+        return finish()
+    _cap_file_map(digest, cap_tokens * FILE_MAP_SHARE, trunc)
+    _cap_diff(digest, cap_tokens * DIFF_SHARE, trunc)
     if _size(digest) <= cap_tokens:
         return finish()
     for limit, name in _EXCERPT_STAGES:
@@ -321,14 +424,17 @@ def apply_budget(digest, cap_tokens=20000):
     if _size(digest) <= cap_tokens:
         return finish()
     # Stage 4 removes at most half of what is left; beyond that, summarise (stage 5).
+    # One pass: drop oldest events until the size estimate fits (at most half).
     events = digest["events"]
     order = sorted(range(len(events)), key=lambda i: _ts_key(events[i]["timestamp"]))
+    excess = (_size(digest) - cap_tokens) * 4
     dropped = set()
     for i in order[:len(events) // 2]:
-        dropped.add(i)
-        digest["events"] = [e for j, e in enumerate(events) if j not in dropped]
-        if _size(digest) <= cap_tokens:
+        if excess <= 0:
             break
+        dropped.add(i)
+        excess -= len(json.dumps(events[i])) + 2
+    digest["events"] = [e for j, e in enumerate(events) if j not in dropped]
     if dropped:
         trunc.append("drop:oldest:%d" % len(dropped))
     if _size(digest) <= cap_tokens:
