@@ -5,7 +5,7 @@ import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import bank, gitinfo, paths, rubric, schema
+from . import bank, gitinfo, paths, rubric, schema, selection
 
 QUICK_CONCEPTS = 5
 THOROUGH_CONCEPTS = 12
@@ -16,7 +16,6 @@ MAX_FOLLOWUPS = 3
 RECHECKABLE = ("open", "completed", "in_progress", "revisit")
 # Finding statuses that mean the developer already worked on it, most advanced first.
 WORKED = ("fixed", "completed", "revisit", "in_progress")
-DIFFICULTIES = ["foundational", "intermediate", "advanced"]
 
 DIGEST_REL = ".enguru/digest.json"
 KEYLOG_REL = ".enguru/keylog.jsonl"
@@ -198,10 +197,15 @@ def _confirmed(idx):
 
 
 def _concept_done(prog, cid):
-    if _concept_status(prog, cid) in ("solid", "retired"):
+    """Done for module advancement only: solid, retired, or parked in the revisit queue
+    (a failed deep question comes back through the warm-up revisits, across modules).
+    A finding mirroring another (same_as) in revisit is done too: it is out of the queue
+    and comes back through the finding it mirrors."""
+    if _concept_status(prog, cid) in ("solid", "retired", "needs_revisit") or cid in prog["revisit"]:
         return True
     f = prog["findings"].get(cid)
-    return bool(f) and f["status"] in ("completed", "fixed")
+    return bool(f) and (f["status"] in ("completed", "fixed")
+                        or (bool(f.get("same_as")) and f["status"] == "revisit"))
 
 
 def _module_concept_ids(tm, module_banks, mid):
@@ -344,14 +348,19 @@ def end_session(repo, now=None) -> dict:
                  and a.get("outcome") != "skipped"}
     if session:
         # The session's own scope, plus findings from any bank that this session served
-        # or recorded (a ladder resumed across scopes, spec 9.5).
+        # or recorded, or that stopped partway in another scope: the findings phase comes
+        # last, so a session can end before it resumes them (spec 9.5).
         tm, _, banks = _load_scope(repo, session)
         touched = set((prog["current"] or {}).get("served_concepts", []))
         touched |= {a["concept_id"] for a in prog["answers"] if a.get("session_id") == sid}
         all_tm, all_banks = _all_banks(repo)
         scope_rels = {rel for rel, _ in banks}
-        extra = [(rel, dict(b, findings=[f for f in b.get("findings", [])
-                                         if f.get("concept_id") in touched]))
+
+        def carried(f):
+            cid = f.get("concept_id")
+            return cid in touched or _finding_state(prog, cid)["status"] == "in_progress"
+
+        extra = [(rel, dict(b, findings=[f for f in b.get("findings", []) if carried(f)]))
                  for rel, b in all_banks if rel not in scope_rels]
         idx = _index(tm or all_tm, banks + extra)
         seen = set()
@@ -414,28 +423,15 @@ def _rebuild(repo, prog, idx, cid, reason):
             "bank_path": bank_path,
             "out_path": ".enguru/work/revisit-%s.json" % cid,
             "asked_question_ids": list(prog["concepts"].get(cid, {}).get("asked_question_ids", [])),
+            "phase": selection.rebuild_phase(prog["concepts"].get(cid, {}),
+                                             idx["questions"].get(cid, [])),
             "digest_path": DIGEST_REL, "keylog_path": KEYLOG_REL}
 
 
-def _pick_question(prog, idx, cid):
-    asked = set(prog["concepts"].get(cid, {}).get("asked_question_ids", []))
-    qs = [q for q in idx["questions"].get(cid, []) if q["id"] not in asked]
-    if not qs:
-        return None
-    failed = any(a["kind"] == "answer" and a["concept_id"] == cid
-                 and a.get("outcome") in ("incorrect", "dont_know") for a in prog["answers"])
-    start = 0 if failed else 1
-
-    def key(item):
-        i, q = item
-        d = DIFFICULTIES.index(q["difficulty"]) if q.get("difficulty") in DIFFICULTIES else 1
-        return (abs(d - start), d, i)
-
-    return min(enumerate(qs), key=key)[1]
-
-
-def _serve(repo, prog, idx, cid, revisit=False, allow_rebuild=True):
-    """Return an ask/rebuild action for a concept, or None to skip it."""
+def _serve(repo, prog, idx, cid, phase=None, only_phase=None, revisit=False,
+           allow_rebuild=True):
+    """Return an ask/rebuild action for a concept, or None to skip it. With `phase`, ask
+    only if the concept's next question is in that phase."""
     if cid in prog["current"]["skipped"]:
         return None
     stale, retired = bank.stale_concepts(repo, [idx["concepts"][cid]["concept"]])
@@ -445,19 +441,38 @@ def _serve(repo, prog, idx, cid, revisit=False, allow_rebuild=True):
         return None
     if stale:
         return _rebuild(repo, prog, idx, cid, "stale")
-    q = _pick_question(prog, idx, cid)
-    if q is None:
+    state, qs = prog["concepts"].get(cid, {}), idx["questions"].get(cid, [])
+    plan = selection.pick(state, qs, only_phase)
+    if plan is None and only_phase is None and prog["current"]["rebuilds"].get(cid, 0) >= 1:
+        plan = selection.below_floor(state, qs)  # the rebuild added nothing deeper
+    if plan is None:
         return _rebuild(repo, prog, idx, cid, "revisit") if allow_rebuild else None
+    q_phase, q = plan
+    if phase is not None and q_phase != phase:
+        return None
     cur = prog["current"]
     cur["pending"] = {"concept_id": cid, "question_id": q["id"]}
     if cid not in cur["served_concepts"]:
         cur["served_concepts"].append(cid)
     cur["served_questions"][cid] = cur["served_questions"].get(cid, 0) + 1
+    cur["served_phases"].setdefault(cid, []).append(q_phase)
     if revisit:
         cur["revisit_served"].append(cid)
     _concept(prog, cid)["asked_question_ids"].append(q["id"])
     _save(repo, prog)
     return {"action": "ask", "question": q}
+
+
+def _session_gate(prog, cid, sid):
+    """None if the concept has not been served this session; else (passed, phase) of its
+    last question here: passed when that answer was correct or partial."""
+    phases = prog["current"]["served_phases"].get(cid)
+    if not phases:
+        return None
+    a = selection.last_quiz_answer(prog["answers"], cid, sid)
+    if a is None:
+        return False, phases[-1]
+    return a.get("outcome") in selection.PASSED, selection.phase_of(a.get("style"))
 
 
 def _finding_answered_in(prog, cid, sid):
@@ -633,7 +648,8 @@ def _resumable(repo, prog, idx, f):
 
 
 def _resume_ladder(repo, prog, sid):
-    """A ladder stopped partway (in_progress) in any scope resumes first, at its saved rung."""
+    """A ladder stopped partway (in_progress) in any scope resumes at its saved rung, first
+    in the findings phase."""
     if not any(f.get("status") == "in_progress" for f in prog["findings"].values()):
         return None
     tm, banks = _all_banks(repo)
@@ -658,9 +674,10 @@ def _revisit_ladder(repo, prog, idx, cid):
     if f is None:
         return None
     cur = prog["current"]
-    cur["served_concepts"].append(cid)
-    cur["revisit_served"].append(cid)
-    _save(repo, prog)
+    if cid not in cur["revisit_served"]:
+        cur["served_concepts"].append(cid)
+        cur["revisit_served"].append(cid)
+        _save(repo, prog)
     return {"action": "ladder", "concept_id": cid, "rung": 1, "step": f["ladder"][0],
             "ladder_length": len(f["ladder"]), "severity": f["severity"], "announce": False,
             "revisit": True, "finding": f}
@@ -672,20 +689,18 @@ def _open_finding_concepts(prog, idx):
 
 
 def next_item(repo) -> dict:
+    """Order of work: housekeeping (builds, verification, fix checks), then up to 2 quiz
+    revisits as warm-up, then the quiz phase by phase (explain it -> what if -> spot the
+    flaw / review a diff), then real findings (ladders), then done."""
     repo = Path(repo)
     prog = load(repo)
     session = _require_session(repo, prog)
     cur = prog["current"]
-    for k in ("rebuilds", "skipped"):
+    for k in ("rebuilds", "skipped", "served_phases"):
         cur.setdefault(k, {})
+    cur.setdefault("revisit_ladders", [])
     if _link_duplicates(repo, prog):
         _save(repo, prog)
-    resume = _resume_ladder(repo, prog, session["id"])
-    if resume:
-        if resume["concept_id"] not in cur["served_concepts"]:
-            cur["served_concepts"].append(resume["concept_id"])
-            _save(repo, prog)
-        return resume
     if session["scope"] == "project":
         if _read_bank(repo, TOPIC_REL) is None:
             return _build_action("build_topic_map", TOPIC_REL, "topic-map")
@@ -714,27 +729,67 @@ def next_item(repo) -> dict:
                     "bank_path": idx["finding_bank"][cid],
                     "out_path": ".enguru/work/verdicts/fixcheck-%s.json" % cid}
 
-    ladder = _next_ladder(prog, idx, session["id"])
+    item = _warm_up(repo, prog, idx)
+    if item:
+        return item
+
+    uncovered = []
+    if session["scope"] == "project":
+        item = _next_project(repo, prog, session, idx, tm, module_banks)
+    else:
+        item, uncovered = _next_diff(repo, prog, session, idx, banks[0][1])
+    if item:
+        return item
+    return _findings_phase(repo, prog, session, idx) or {"action": "done", "uncovered": uncovered}
+
+
+def _revisit_slots_used(cur):
+    reserved = [c for c in cur["revisit_ladders"] if c not in cur["revisit_served"]]
+    return len(cur["revisit_served"]) + len(reserved)
+
+
+def _warm_up(repo, prog, idx):
+    """Up to 2 revisit items per session, in queue order. Quiz revisits are served now, as
+    warm-up; a finding explained by last resort is held for the findings phase (its slot is
+    reserved here)."""
+    cur = prog["current"]
+    busy = _open_finding_concepts(prog, idx)
+    for cid in list(prog["revisit"]):
+        if _revisit_slots_used(cur) >= REVISIT_PER_SESSION:
+            return None
+        if (cid in cur["served_concepts"] or cid in cur["revisit_ladders"]
+                or cid not in idx["concepts"] or cid in busy
+                or _concept_status(prog, cid) == "retired"):
+            continue
+        if (_finding_state(prog, cid)["status"] == "revisit"
+                and any(f["concept_id"] == cid for f in _confirmed(idx))):
+            cur["revisit_ladders"].append(cid)
+            _save(repo, prog)
+            continue
+        item = _serve(repo, prog, idx, cid, revisit=True)
+        if item:
+            return item
+    return None
+
+
+def _findings_phase(repo, prog, session, idx):
+    """Real findings, after the quiz: a ladder stopped partway (any scope) resumes at its
+    saved rung first, then this scope's open findings (critical first), then the findings
+    held for revisit."""
+    cur = prog["current"]
+    ladder = _resume_ladder(repo, prog, session["id"]) or _next_ladder(prog, idx, session["id"])
     if ladder:
         if ladder["concept_id"] not in cur["served_concepts"]:
             cur["served_concepts"].append(ladder["concept_id"])
             _save(repo, prog)
         return ladder
-
-    if len(cur["revisit_served"]) < REVISIT_PER_SESSION:
-        busy = _open_finding_concepts(prog, idx)
-        for cid in list(prog["revisit"]):
-            if (cid in cur["served_concepts"] or cid not in idx["concepts"] or cid in busy
-                    or _concept_status(prog, cid) == "retired"):
-                continue
-            item = (_revisit_ladder(repo, prog, idx, cid)
-                    or _serve(repo, prog, idx, cid, revisit=True))
+    for cid in cur["revisit_ladders"]:
+        if (_concept_status(prog, cid) != "retired"
+                and not _finding_answered_in(prog, cid, session["id"])):
+            item = _revisit_ladder(repo, prog, idx, cid)
             if item:
                 return item
-
-    if session["scope"] == "project":
-        return _next_project(repo, prog, session, idx, tm, module_banks)
-    return _next_diff(repo, prog, session, idx, banks[0][1])
+    return None
 
 
 def _held_for_revisit(prog, cid):
@@ -745,28 +800,39 @@ def _held_for_revisit(prog, cid):
 
 
 def _next_project(repo, prog, session, idx, tm, module_banks):
+    """The session's module, phase by phase: every concept's explain-it question, then
+    what-if, then spot-the-flaw / review-diff. A concept moves to the next phase this
+    session only if it passed (correct or partial) the one before; None when the quiz part
+    of the module is over."""
     cur = prog["current"]
     if session["module_id"] is None:
         session["module_id"] = _pick_module(prog, tm, module_banks)
         if session["module_id"] is None:
-            return {"action": "done", "uncovered": []}
+            return None
         _save(repo, prog)
     mid = session["module_id"]
     if mid not in module_banks:
         return _build_action("build_module", _module_rel(mid), "module-" + mid, module_id=mid)
-    for cid in _module_concept_ids(tm, module_banks, mid):
-        entry = idx["concepts"].get(cid)
-        if (entry is None or entry["concept"].get("kind") != "quiz"
-                or _concept_status(prog, cid) in ("solid", "retired")
-                or cid in cur["served_concepts"] or _held_for_revisit(prog, cid)):
-            continue
-        item = _serve(repo, prog, idx, cid)
-        if item:
-            return item
-    return {"action": "done", "uncovered": []}
+    cids = [cid for cid in _module_concept_ids(tm, module_banks, mid)
+            if (idx["concepts"].get(cid) or {}).get("concept", {}).get("kind") == "quiz"
+            and not _held_for_revisit(prog, cid)]
+    for phase in selection.QUIZ_PHASES:
+        for cid in cids:
+            if _concept_status(prog, cid) in ("solid", "retired"):
+                continue
+            served = cur["served_phases"].get(cid, [])
+            gate = _session_gate(prog, cid, session["id"])
+            if phase in served or (gate is not None and not gate[0]):
+                continue
+            item = _serve(repo, prog, idx, cid, phase=phase, allow_rebuild=not served)
+            if item:
+                return item
+    return None
 
 
 def _next_diff(repo, prog, session, idx, diff_bank):
+    """The risk-ordered window of concepts, phase by phase. Returns (item or None,
+    uncovered concept ids)."""
     cur = prog["current"]
     thorough = session.get("intensity") == "thorough"
     limit = THOROUGH_CONCEPTS if thorough else QUICK_CONCEPTS
@@ -782,17 +848,23 @@ def _next_diff(repo, prog, session, idx, diff_bank):
             continue
         candidates.append(cid)
     window, uncovered = candidates[:limit], candidates[limit:]
-    for cid in window:
-        served = cur["served_questions"].get(cid, 0)
-        if served == 0:
-            item = _serve(repo, prog, idx, cid)
-        elif served < per_concept and _concept_status(prog, cid) != "solid":
-            item = _serve(repo, prog, idx, cid, allow_rebuild=False)
-        else:
-            continue
-        if item:
-            return item
-    return {"action": "done", "uncovered": uncovered}
+    for phase in selection.QUIZ_PHASES:
+        for cid in window:
+            served = cur["served_questions"].get(cid, 0)
+            if served >= per_concept:
+                continue
+            if served == 0:
+                item = _serve(repo, prog, idx, cid, phase=phase)
+            elif _concept_status(prog, cid) == "solid":
+                continue
+            else:
+                # a 2nd question: the next phase if the 1st passed, else the same phase
+                passed, last_phase = _session_gate(prog, cid, session["id"]) or (True, None)
+                item = _serve(repo, prog, idx, cid, phase=phase,
+                              only_phase=None if passed else last_phase, allow_rebuild=False)
+            if item:
+                return item, uncovered
+    return None, uncovered
 
 
 # -------------------------------------------------------------------- record
@@ -816,6 +888,11 @@ def _kind_rules(rec):
     elif kind == "fix_check" and "fix_verdict" not in rec:
         errs.append("$: fix_check record needs 'fix_verdict'")
     return errs
+
+
+def _deepest_phase(repo, session, cid):
+    tm, _, banks = _load_scope(repo, session)
+    return selection.deepest_phase(_index(tm, banks)["questions"].get(cid, []))
 
 
 def record(repo, rec) -> dict:
@@ -861,7 +938,7 @@ def record(repo, rec) -> dict:
         st = prog["findings"].setdefault(cid, {"status": "open", "rung": 1})
         if rec.get("revealed"):
             # Explained by last resort: back to the revisit queue (spec 9.5), not to the
-            # findings-first slot; no longer an undisclosed issue.
+            # findings phase; no longer an undisclosed issue.
             st.update(status="revisit", rung=1, explained=True)
             _add_revisit(prog, cid)
         else:
@@ -869,11 +946,22 @@ def record(repo, rec) -> dict:
             _remove_revisit(prog, cid)
         result = st["status"]
     else:
+        # Solid needs a correct answer on the deepest phase the concept has questions for;
+        # phase_passed is the deepest phase answered correct or partial (the phase gate).
         c = _concept(prog, cid)
-        if rec["outcome"] == "correct":
+        phase = selection.phase_of(rec.get("style"))
+        if rec["outcome"] in selection.PASSED:
+            c["phase_passed"] = max(int(c.get("phase_passed") or 0), phase)
+        deepest = phase >= (_deepest_phase(repo, session, cid) or phase)
+        if rec["outcome"] == "correct" and deepest:
             c["status"] = "solid"
             _remove_revisit(prog, cid)
-        elif rec["outcome"] == "skipped" or rec.get("followups_used", 0) >= MAX_FOLLOWUPS:
+        elif rec["outcome"] == "correct":
+            pass  # below the deepest phase: a revisit concept stays queued until it gets there
+        elif (rec["outcome"] == "skipped" or rec.get("followups_used", 0) >= MAX_FOLLOWUPS
+              or (deepest and rec["outcome"] in ("incorrect", "dont_know"))):
+            # A failed deepest question parks the concept in revisit so the module can
+            # still advance (_concept_done); it comes back as a warm-up revisit.
             c["status"] = "needs_revisit"
             _add_revisit(prog, cid)
         result = c["status"]

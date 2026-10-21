@@ -23,7 +23,7 @@ The prompt gives `mode`, `digest_path`, `out_path`, `keylog_path`, and:
 - `topic_map`: nothing more.
 - `module`: `module_id` and `topic_map_path`.
 - `diff_bank`: `range_id`.
-- `revisit`: `concept_id`, `bank_path`, `asked_question_ids`, `topic_map_path`.
+- `revisit`: `concept_id`, `bank_path`, `asked_question_ids`, `topic_map_path`, `phase`.
 
 The digest (`digest_path`) holds `meta`, `file_map` (`files`, `stack`, `entry_points`), `git` (`commits`, `churn_files` as `[path, lines_changed]`, `dependency_history`, `reverts` as SHAs), `events[]` (`id`, `label` request|choice|pushback|churn|dependency|revert, `paraphrase`, `files`, `source`), and in diff mode `diff` (`hunks[]` with `id`, `path`, `old_start`, `new_start`, `lines`; `excluded`; `blast_radius_candidates[]` with `path`, `line`, `symbol`, `kind` caller|test).
 
@@ -32,20 +32,20 @@ The digest (`digest_path`) holds `meta`, `file_map` (`files`, `stack`, `entry_po
 ## Modes
 
 ### `topic_map`
-Write `{"modules": [...]}` with 4–8 modules suited to this project (its real architecture, not a generic list), each `{id, title, concepts}` with 3–6 concepts. Each concept is a full Concept record (see Records): `id`, `module` set to its module's id, `title`, `why_it_matters`, `risk_tier`, `kind: "quiz"`, `evidence_refs` (at least one) and `evidence_hashes: {}`. Concept ids are unique across the whole map. No questions or findings.
+Write `{"modules": [...]}` with 4–8 modules suited to this project (its real architecture, not a generic list), each `{id, title, concepts}` with 3–6 concepts. The interview takes modules in list order, so order them from the core definition outward: module 1 is what the project is and its core flow (its purpose, entry points, main data path and key components); later modules are more specialized parts. Within each module, order concepts from definitional (what it is, what it does) to detailed (edge cases, internals). Each concept is a full Concept record (see Records): `id`, `module` set to its module's id, `title`, `why_it_matters`, `risk_tier`, `kind: "quiz"`, `evidence_refs` (at least one) and `evidence_hashes: {}`. Concept ids are unique across the whole map. No questions or findings.
 
 ### `module`
-Read `topic_map_path`. Write a bank with `scope_key: "project:<module_id>"`. Include that module's topic-map concepts with the **same ids** (update refs if the code moved), and add extra concepts only for findings. Every concept has at least one `explain_it` question. Across the module, use all four styles wherever the evidence supports them; never invent evidence to force a style. Each question has a `difficulty`; mix foundational, intermediate and advanced.
+Read `topic_map_path`. Write a bank with `scope_key: "project:<module_id>"`. Include that module's topic-map concepts with the **same ids** (update refs if the code moved), and add extra concepts only for findings. Questions follow the progression (see Question progression); across the module, use all four styles wherever the evidence supports them.
 
 ### `diff_bank`
 Write a bank with `scope_key: "diff:<range_id>"` and concept `module: "diff"`. Concepts cover the change and its blast radius, ordered by risk:
 - tier 1: auth, data writes, money, external calls;
 - tier 2: changed contracts (signatures, return shapes, schemas, APIs callers rely on);
 - tier 3: untested paths.
-Use the hunks and the blast-radius candidates. Candidates are only grep hits: open each one you use and drop those that are irrelevant (same name, different thing; comments; unaffected callers). `review_diff` questions show the developer's own hunks.
+Use the hunks and the blast-radius candidates. Candidates are only grep hits: open each one you use and drop those that are irrelevant (same name, different thing; comments; unaffected callers). `review_diff` questions show the developer's own hunks. Questions follow the progression (see Question progression).
 
 ### `revisit`
-Read `bank_path` to see the concept and the questions already asked (`asked_question_ids`). If the concept is not in `bank_path`, or `bank_path` does not exist yet, read the concept from `topic_map_path`. Write a partial bank: `{"scope_key": <the bank's scope_key, or "project:<the concept's module>" if bank_path is the topic map or missing>, "concepts": [that concept], "questions": [new ones only], "findings": []}`. Copy the concept unchanged (same `id`, `module`, `title`, `why_it_matters`, `risk_tier`, `kind`, `evidence_hashes`) except `evidence_refs`, which you update to the current code. New question ids must be fresh and must not collide with any id in the bank. Each new prompt must differ from every earlier one: a different angle, situation or style, never a reworded copy.
+Read `bank_path` to see the concept and the questions already asked (`asked_question_ids`). If the concept is not in `bank_path`, or `bank_path` does not exist yet, read the concept from `topic_map_path`. Write a partial bank: `{"scope_key": <the bank's scope_key, or "project:<the concept's module>" if bank_path is the topic map or missing>, "concepts": [that concept], "questions": [new ones only], "findings": []}`. Copy the concept unchanged (same `id`, `module`, `title`, `why_it_matters`, `risk_tier`, `kind`, `evidence_hashes`) except `evidence_refs`, which you update to the current code. New question ids must be fresh and must not collide with any id in the bank. Each new prompt must differ from every earlier one: a different angle, situation or style, never a reworded copy. `phase` is where the developer is in the progression (1 = `explain_it`, 2 = `what_if`, 3 = `spot_the_flaw` or `review_diff`): write at least one new question in that phase. Add a new `explain_it` at `foundational` only if the concept has no unasked `explain_it` left (none in the bank outside `asked_question_ids`). If the evidence truly cannot support the asked phase, write the closest phase it does support.
 
 ## Records
 
@@ -65,6 +65,15 @@ Question: `{id, concept_id, style, skill, difficulty, prompt, context, answer_ke
 Grounding rule: every `must_have`, `nice_to_have` and `misconception` cites an `evidence_ref` showing it is true of this code. If you cannot cite it, leave it out. Misconceptions are beliefs a developer could plausibly hold about this code (often what the agent or developer first assumed, per the events), with the correction the code proves.
 
 Ids: short slugs, unique within the bank, prefixed by module or range so they stay unique across banks: concept `auth-session-1`, question `q-auth-session-1-a`.
+
+## Question progression
+
+The interview asks each concept's questions in phases: first `explain_it` (what it is and why), then `what_if` (what happens when something changes or fails), then `spot_the_flaw` or `review_diff` (find the defect), and only after all of that the real findings. A concept moves to the next phase only once the developer has answered the earlier one, so give every concept somewhere to go:
+- at least one `explain_it` at `foundational` (add an `intermediate` one where useful);
+- where the evidence supports it, a `what_if` and a `spot_the_flaw` (or `review_diff`) on the same concept;
+- difficulty rises with the phase: `explain_it` foundational or intermediate, `what_if` intermediate, `spot_the_flaw` / `review_diff` intermediate or advanced.
+
+Never invent evidence to force a style; a concept with no grounded `what_if` or flaw simply has fewer phases. Questions do not replace findings: look for real issues as hard as before (see Findings).
 
 ## Question styles
 
@@ -101,7 +110,7 @@ For each finding:
    "risk_tier": 1, "kind": "finding", "evidence_refs": [{"file": "src/refund.py", "lines": [10, 30]}], "evidence_hashes": {}}],
  "questions": [
   {"id": "q-orders-lock-1-a", "concept_id": "orders-lock-1", "style": "explain_it", "skill": "comprehension",
-   "difficulty": "intermediate", "prompt": "Why does save_order take the lock before reading the balance?", "context": "",
+   "difficulty": "foundational", "prompt": "Why does save_order take the lock before reading the balance?", "context": "",
    "answer_key": {
      "must_have": [{"point": "Read and write must be atomic", "explanation": "Otherwise two requests both pass the check.",
                     "evidence_ref": {"file": "src/orders.py", "lines": [44, 52]}}],

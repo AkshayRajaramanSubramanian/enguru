@@ -60,7 +60,7 @@ Add `--quick` or `--thorough` to `session start` only if the developer gave it (
 
 ## 4. Introduction
 
-Brief and specific: what this session covers (project mode: the next module; diff mode: the change and the code it affects, at the chosen intensity; mention open real findings or revisits if `open_findings` or `revisit_count` are non-zero). Then the commands: `hint` (a nudge: first the file, then the region), `skip` (move on; it comes back later), `stop` (end and summarize). Say that "I don't know" beats guessing: it gets a full explanation and costs nothing extra.
+Brief and specific: what this session covers (project mode: the next module; diff mode: the change and the code it affects, at the chosen intensity; mention open real findings or revisits if `open_findings` or `revisit_count` are non-zero). Say how it progresses: it starts with what the code is ("explain it"), moves to "what if" questions, then "spot the flaw", and ends with any real issues found in their code. Then the commands: `hint` (a nudge: first the file, then the region), `skip` (move on; it comes back later), `stop` (end and summarize). Say that "I don't know" beats guessing: it gets a full explanation and costs nothing extra.
 
 ## 5. Interview loop
 
@@ -79,7 +79,7 @@ Tell the developer in one line that you are reading their code (this can take a 
 
 ### `rebuild_concept`
 
-The concept's code changed (`reason: stale`) or its questions are used up (`reason: revisit`). Dispatch `enguru:project-analyst` with `mode: revisit`, `concept_id`, `bank_path`, `asked_question_ids`, `topic_map_path: .enguru/banks/project/topic-map.json`, `digest_path`, `out_path`, `keylog_path`. The analyst writes a partial bank to the work file `out_path`. Validate it (below). If it passes: `enguru bank merge <bank_path> <out_path>`, then `enguru bank seal <bank_path> --ids <concept_id>` (required, or the rebuilt concept can never be detected as stale; `--ids` leaves the other concepts alone). On give-up, `rm -f <out_path>` and call `next`; the CLI will not ask for that rebuild again this session.
+The concept's code changed (`reason: stale`) or its questions are used up (`reason: revisit`). Dispatch `enguru:project-analyst` with `mode: revisit`, `concept_id`, `bank_path`, `asked_question_ids`, `phase`, `topic_map_path: .enguru/banks/project/topic-map.json`, `digest_path`, `out_path`, `keylog_path`. The analyst writes a partial bank to the work file `out_path`. Validate it (below). If it passes: `enguru bank merge <bank_path> <out_path>`, then `enguru bank seal <bank_path> --ids <concept_id>` (required, or the rebuilt concept can never be detected as stale; `--ids` leaves the other concepts alone). On give-up, `rm -f <out_path>` and call `next`; the CLI will not ask for that rebuild again this session.
 
 ### Validate (after every analyst run, on its `out_path`)
 

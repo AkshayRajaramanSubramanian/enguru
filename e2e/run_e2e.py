@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end run of the enguru plugin with a scripted student.
 
-Usage: python3 e2e/run_e2e.py [--model sonnet] [--max-turns 25] [--keep]
+Usage: python3 e2e/run_e2e.py [--model sonnet] [--max-turns 40] [--keep]
 
 1. Builds e2e/sample-app as a real git repo in a temp dir (main with a buggy commit and its
    fix, then a feature branch), and installs e2e/sample-transcripts under a temp transcripts
@@ -16,10 +16,14 @@ Usage: python3 e2e/run_e2e.py [--model sonnet] [--max-turns 25] [--keep]
 3. Answers each interviewer turn with a separate tool-less `claude -p` call that plays
    e2e/student_persona.md. The driver itself types `stop` in the first session as soon as
    the ladder has moved to rung 2, and in any session that reaches --max-turns.
-   The analyst decides the modules and their order, so the first module does not always
+   The analyst decides the modules and their order, and real findings come after the quiz
+   (explain it -> what if -> spot the flaw -> findings), so the first module does not always
    hold a confirmed finding. Session 1 reaching a ladder is a precondition for (c) and (d):
-   when it does not, the driver starts over from a fresh repo (up to --attempts times, all
-   recorded in the output) and, after the last attempt, reports (c) and (d) as not exercised.
+   when a project session ends without one, the driver runs another project session on the
+   same repo (the next module, once the first is solid; up to --project-sessions), then
+   starts over from a fresh repo (up to --attempts times, all recorded in the output) and,
+   after the last attempt, reports (c) and (d) as not exercised. "Session 1" below is the
+   project session that stopped partway through a ladder.
    The whole run is capped by --max-minutes: past it, an open session gets `stop`, later
    sessions and the certificate are skipped, and the assertions report what is missing.
 4. Checks (a)-(f) against .enguru/ and the interviewer transcripts, prints one JSON object,
@@ -332,10 +336,14 @@ def assert_c(s1, finding):
                  "or progress.end_session (undisclosed_critical)")
 
 
-def first_next(repo, claude_sid):
+def first_ladder(repo, claude_sid):
+    """The first `next` result in a session whose action is `ladder` (findings come after
+    the quiz phases, so it is not the first `next`)."""
     for cmd, res in transcript_tool_results(claude_sid, repo):
         if NEXT_CALL.search(cmd):
-            return common.last_json_line(res) or {"unparsed": res[:300]}
+            out = common.last_json_line(res)
+            if isinstance(out, dict) and out.get("action") == "ladder":
+                return out
     return None
 
 
@@ -343,13 +351,13 @@ def assert_d(repo, s2, finding, rung):
     if finding is None or rung is None:
         return check(False, "not exercised: no saved ladder rung from session 1",
                      "project-analyst / finding-verifier or driver"), None
-    nxt = first_next(repo, s2["claude_session"])
-    ok = (isinstance(nxt, dict) and nxt.get("action") == "ladder"
-          and nxt.get("concept_id") == finding["concept_id"] and nxt.get("rung") == rung)
+    nxt = first_ladder(repo, s2["claude_session"])
+    ok = (isinstance(nxt, dict) and nxt.get("concept_id") == finding["concept_id"]
+          and nxt.get("rung") == rung)
     got = None if nxt is None else {k: nxt.get(k) for k in ("action", "concept_id", "rung")}
-    return check(ok, "saved %s at rung %s; session 2 first next: %s"
+    return check(ok, "saved %s at rung %s; session 2 first ladder: %s"
                  % (finding["concept_id"], rung, got),
-                 "progress.next_item (resume the in-progress ladder)"), got
+                 "progress.next_item (resume the in-progress ladder in the findings phase)"), got
 
 
 def assert_e(repo, prog):
@@ -385,7 +393,9 @@ def assert_f(repo):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default=common.MODEL)
-    ap.add_argument("--max-turns", type=int, default=25)
+    ap.add_argument("--max-turns", type=int, default=40)
+    ap.add_argument("--project-sessions", type=int, default=3,
+                    help="project sessions per attempt while none has reached a ladder")
     ap.add_argument("--keep", action="store_true", help="keep the temp dir for debugging")
     ap.add_argument("--max-minutes", type=float, default=120,
                     help="wall-clock cap for the whole run; sessions still open are stopped")
@@ -409,12 +419,22 @@ def main(argv=None):
         env = dict(os.environ, ENGURU_TRANSCRIPTS_ROOT=str(tx_root))
         log("attempt %d: repo %s, plugin copy %s" % (attempt, repo, common.plugin_dir()))
         first = run_interview(repo, env, *SESSIONS[0], args.model, args.max_turns, student_cwd)
+        project_runs = [first["stopped_by"]]
+        while (first["stopped_by"] is None and first["ended"]
+               and len(project_runs) < args.project_sessions and time.time() < DEADLINE["at"]):
+            # The session finished its module's quiz and findings without a ladder: the next
+            # project session takes the same module again (not solid yet) or the next one.
+            # (its answers stay in this repo's progress.json, so (a) still sees them)
+            log("attempt %d: project session %d reached no ladder; another project session"
+                % (attempt, len(project_runs)))
+            first = run_interview(repo, env, *SESSIONS[0], args.model, args.max_turns, student_cwd)
+            project_runs.append(first["stopped_by"])
         modules = [m.get("id") for m in (json.loads((repo / ".enguru/banks/project/topic-map.json")
                                                     .read_text(encoding="utf-8")).get("modules", [])
                                          if (repo / ".enguru/banks/project/topic-map.json").exists()
                                          else [])]
         attempts.append({"attempt": attempt, "session1_stopped_by": first["stopped_by"],
-                         "modules": modules})
+                         "project_sessions_stopped_by": project_runs, "modules": modules})
         if (first["stopped_by"] == "persona_stop_mid_ladder" or attempt == args.attempts
                 or time.time() >= DEADLINE["at"]):
             break
@@ -478,7 +498,7 @@ def main(argv=None):
                 "stopped_finding": finding and {k: finding.get(k) for k in
                                                 ("concept_id", "severity", "lines", "bank")},
                 "saved_rung": rung,
-                "session2_first_next": d_next,
+                "session2_first_ladder": d_next,
                 "matches_planted": bool(finding and finding["lines"]["file"] in {p["file"] for p in planted}),
                 "confirmed_findings": [{k: f.get(k) for k in ("concept_id", "severity", "lines", "bank")}
                                        for f in findings],
