@@ -358,14 +358,19 @@ def _rebuild(repo, prog, idx, cid, reason):
     """Return a rebuild action, or None (and skip the concept for the session)
     when this session already asked for one and it did not help."""
     cur = prog["current"]
-    if cur["rebuilds"].get(cid, 0) >= 1:
-        cur["skipped"][cid] = "rebuild_failed:" + reason
+    entry = idx["concepts"][cid]
+    bank_path = entry["bank"]
+    if bank_path == TOPIC_REL:  # only in the topic map: merge into its module bank
+        module = entry["concept"].get("module")
+        bank_path = _module_rel(module) if isinstance(module, str) and _SAFE_NAME.match(module) else None
+    if bank_path is None or cur["rebuilds"].get(cid, 0) >= 1:
+        cur["skipped"][cid] = "rebuild_failed:" + reason if bank_path else "no_module_bank"
         _save(repo, prog)
         return None
     cur["rebuilds"][cid] = cur["rebuilds"].get(cid, 0) + 1
     _save(repo, prog)
     return {"action": "rebuild_concept", "concept_id": cid, "reason": reason,
-            "bank_path": idx["concepts"][cid]["bank"],
+            "bank_path": bank_path,
             "out_path": ".enguru/work/revisit-%s.json" % cid,
             "asked_question_ids": list(prog["concepts"].get(cid, {}).get("asked_question_ids", [])),
             "digest_path": DIGEST_REL, "keylog_path": KEYLOG_REL}

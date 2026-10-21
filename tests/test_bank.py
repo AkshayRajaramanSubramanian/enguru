@@ -283,3 +283,13 @@ def test_merge_partial_replaces_by_id_and_adds_new(tmp_path):
     assert [(q["id"], q["prompt"]) for q in out["questions"]] == [("q1", "replaced"), ("q2", "p")]
     assert [f["severity"] for f in out["findings"]] == ["critical"]
     run_cli(["bank", "merge", "bank.json", "part.json"], repo)
+
+
+def test_merge_partial_creates_missing_target_bank(tmp_path):
+    repo = mk(tmp_path)
+    pp = repo / "part.json"
+    paths.atomic_write_json(pp, base_bank())
+    run_cli(["bank", "merge", "new/m9.json", "part.json"], repo)
+    out = paths.read_json(repo / "new" / "m9.json")
+    assert out == {"scope_key": "project", "concepts": base_bank()["concepts"],
+                   "questions": base_bank()["questions"], "findings": base_bank()["findings"]}

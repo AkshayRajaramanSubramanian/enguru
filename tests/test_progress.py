@@ -682,3 +682,17 @@ def test_thorough_skipped_concept_gets_second_question(tmp_path):
     repo, scope, s = start_diff(tmp_path, make_bank(["a", "b"], per_concept=3), "thorough")
     answer_ask(repo, s["session_id"], progress.next_item(repo), "skipped")
     assert progress.next_item(repo)["question"]["id"] == "q-a-2"
+
+
+def test_rebuild_of_topic_map_only_concept_targets_module_bank(tmp_path):
+    repo = diff_repo(tmp_path)
+    pdir = Path(repo) / ".enguru" / "banks" / "project"
+    write_bank(pdir / "topic-map.json", {"modules": [
+        {"id": "m1", "title": "M1", "concepts": [concept("a"), concept("c")]}]})
+    write_bank(pdir / "m1.json", make_bank(["a"], scope_key="project"))  # analyst dropped c
+    s = progress.start_session(repo, digest.Scope("project"), None)
+    progress.record(repo, rec(s["session_id"], "c", "q-c-1", "skipped", scope="project"))
+    restart(repo, digest.Scope("project"), None)
+    item = progress.next_item(repo)
+    assert item["action"] == "rebuild_concept" and item["concept_id"] == "c"
+    assert item["bank_path"] == ".enguru/banks/project/m1.json"

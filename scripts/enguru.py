@@ -141,7 +141,8 @@ def cmd_bank_merge(args):
     from enguru_lib import bank
     repo = _repo_root(os.getcwd())
     path, part = _bank_path(repo, args.path), _bank_path(repo, args.partial)
-    _load_bank_json(path)
+    if path.exists():
+        _load_bank_json(path)
     _load_bank_json(part)
     bank.merge_partial(path, part)
     emit({"ok": True})

@@ -327,9 +327,15 @@ def _merge_by(existing, incoming, key):
 
 def merge_partial(bank_path, partial_path) -> None:
     """Merge a bank-shaped partial: concepts and questions replace by id,
-    findings replace by concept_id; new items are appended."""
-    data = paths.read_json(bank_path)
+    findings replace by concept_id; new items are appended. A missing target
+    bank is created from the partial."""
     part = paths.read_json(partial_path)
+    if Path(bank_path).exists():
+        data = paths.read_json(bank_path)
+    else:
+        Path(bank_path).parent.mkdir(parents=True, exist_ok=True)
+        data = {"scope_key": part.get("scope_key", "project"), "concepts": [], "questions": [],
+                "findings": []}
     for section, key in (("concepts", "id"), ("questions", "id"), ("findings", "concept_id")):
         data[section] = _merge_by(data.get(section, []), part.get(section) or [], key)
     paths.atomic_write_json(Path(bank_path), data)
