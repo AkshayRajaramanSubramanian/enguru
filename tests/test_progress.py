@@ -20,8 +20,12 @@ def concept(cid, kind="quiz", risk=2, module="m1", files=("app.py",)):
             "evidence_hashes": {}}
 
 
+SKILLS = {"explain_it": "comprehension", "what_if": "systems_thinking",
+          "spot_the_flaw": "defect_detection", "review_diff": "review_judgment"}
+
+
 def question(qid, cid, difficulty="intermediate", style="explain_it", file="app.py"):
-    return {"id": qid, "concept_id": cid, "style": style, "skill": "comprehension",
+    return {"id": qid, "concept_id": cid, "style": style, "skill": SKILLS[style],
             "difficulty": difficulty, "prompt": "prompt " + qid, "context": "",
             "answer_key": {"must_have": [{"point": "p", "explanation": "e",
                                           "evidence_ref": {"file": file, "lines": [1, 2]}}],
@@ -105,7 +109,20 @@ def rec(sid, cid, qid=None, outcome="correct", kind="answer", qkind="quiz", **kw
 def answer_ask(repo, sid, item, outcome="correct", **kw):
     assert item["action"] == "ask", item
     q = item["question"]
+    kw.setdefault("style", q["style"])
+    kw.setdefault("difficulty", q["difficulty"])
     return progress.record(repo, rec(sid, q["concept_id"], q["id"], outcome, **kw))
+
+
+def drain_asks(repo, sid, outcome="partial", **kw):
+    """Answer every ask until another action comes; return (asked question ids, that action)."""
+    asked = []
+    while True:
+        item = progress.next_item(repo)
+        if item["action"] != "ask":
+            return asked, item
+        asked.append(item["question"]["id"])
+        answer_ask(repo, sid, item, outcome, **kw)
 
 
 def finish_ladder(repo, sid, cid, revealed=False):
@@ -119,11 +136,12 @@ def load_progress(repo):
 
 # ---------------------------------------------------------------- named tests
 
-def test_findings_first_critical_before_major_and_announce_on_rung1(tmp_path):
+def test_findings_after_quiz_critical_before_major_and_announce_on_rung1(tmp_path):
     b = make_bank(["c1", "c2"], [finding("f-major", "major"), finding("f-crit", "critical")])
     repo, scope, s = start_diff(tmp_path, b)
     sid = s["session_id"]
-    item = progress.next_item(repo)
+    asked, item = drain_asks(repo, sid)
+    assert asked == ["q-c1-1", "q-c2-1"]  # real findings come last
     assert item["action"] == "ladder" and item["concept_id"] == "f-crit"
     assert item["severity"] == "critical" and item["rung"] == 1 and item["announce"] is True
     assert item["step"] == b["findings"][1]["ladder"][0] and item["ladder_length"] == 3
@@ -142,7 +160,8 @@ def test_in_progress_finding_served_before_open_critical(tmp_path):
     repo, scope, s = start_diff(tmp_path, b)
     progress.record(repo, rec(s["session_id"], "f-major", None, "incorrect", kind="ladder_progress",
                               qkind="finding", ladder_rung_reached=2, ladder_length=3))
-    item = progress.next_item(repo)
+    asked, item = drain_asks(repo, s["session_id"])
+    assert asked == ["q-c1-1"]
     assert item["concept_id"] == "f-major" and item["rung"] == 2
 
 
@@ -194,18 +213,12 @@ def test_quick_serves_five_concepts_plus_findings(tmp_path):
     b = make_bank(quiz, [finding("f1")])
     repo, scope, s = start_diff(tmp_path, b, "quick")
     sid = s["session_id"]
-    item = progress.next_item(repo)
-    assert item["action"] == "ladder"
+    asked, item = drain_asks(repo, sid)
+    assert [q[2:4] for q in asked] == ["c3", "c4", "c5", "c6", "c0"]
+    assert item["action"] == "ladder" and item["concept_id"] == "f1"  # after the quiz
     finish_ladder(repo, sid, "f1")
-    asked = []
-    while True:
-        item = progress.next_item(repo)
-        if item["action"] == "done":
-            break
-        asked.append(item["question"]["concept_id"])
-        answer_ask(repo, sid, item, "partial")
-    assert asked == ["c3", "c4", "c5", "c6", "c0"]
-    assert item["uncovered"] == ["c1", "c2"]
+    item = progress.next_item(repo)
+    assert item == {"action": "done", "uncovered": ["c1", "c2"]}
 
 
 def test_thorough_caps_12_concepts_2_questions(tmp_path):
@@ -234,22 +247,22 @@ def test_thorough_second_question_skipped_when_solid(tmp_path):
     assert progress.next_item(repo)["question"]["concept_id"] == "b"
 
 
-def test_starting_difficulty_foundational_after_failure(tmp_path):
+def test_difficulty_starts_foundational_and_stays_lowest_after_failure(tmp_path):
     b = make_bank(["c1"])
-    b["questions"] = [question("qa", "c1", "advanced"), question("qf", "c1", "foundational"),
-                      question("qi", "c1", "intermediate")]
+    b["questions"] = [question("qa", "c1", "advanced"), question("qi", "c1", "intermediate"),
+                      question("qf", "c1", "foundational")]
     b["concepts"].append(concept("c2"))
     b["questions"].append(question("qa2", "c2", "advanced"))
     repo, scope, s = start_diff(tmp_path, b)
     item = progress.next_item(repo)
-    assert item["question"]["id"] == "qi"
+    assert item["question"]["id"] == "qf"  # always foundational first
     answer_ask(repo, s["session_id"], item, "incorrect")
     item = progress.next_item(repo)
-    assert item["question"]["id"] == "qa2"  # only advanced available: nearest difficulty
+    assert item["question"]["id"] == "qa2"  # only advanced available: easiest there is
     answer_ask(repo, s["session_id"], item, "correct")
     restart(repo, scope)
     item = progress.next_item(repo)
-    assert item["question"]["id"] == "qf"
+    assert item["question"]["id"] == "qi"  # the easiest one still unasked
 
 
 def test_skip_and_followup_cap_send_to_revisit(tmp_path):
@@ -267,11 +280,11 @@ def test_skip_and_followup_cap_send_to_revisit(tmp_path):
     assert load_progress(repo)["revisit"] == ["c2"]
 
 
-def test_revealed_finding_goes_to_revisit_queue_not_findings_first(tmp_path):
-    b = make_bank(["c1", "c2"], [finding("f1"), finding("f2")])
+def test_revealed_finding_goes_to_revisit_queue_not_back_to_its_slot(tmp_path):
+    b = make_bank(["c1", "c2"], [finding("f1"), finding("f2")], per_concept=2)
     repo, scope, s = start_diff(tmp_path, b)
     sid = s["session_id"]
-    assert progress.next_item(repo)["concept_id"] == "f1"
+    assert drain_asks(repo, sid)[1]["concept_id"] == "f1"
     for rung in (2, 3):
         progress.record(repo, rec(sid, "f1", None, "incorrect", kind="ladder_progress",
                                   qkind="finding", ladder_rung_reached=rung, ladder_length=3))
@@ -282,11 +295,12 @@ def test_revealed_finding_goes_to_revisit_queue_not_findings_first(tmp_path):
     assert "f1" in p["revisit"]
     assert progress.next_item(repo)["concept_id"] == "f2"
     finish_ladder(repo, sid, "f2", revealed=True)
-    item = progress.next_item(repo)
-    assert item["action"] == "ask" and item["question"]["concept_id"] == "c1"
+    assert progress.next_item(repo) == {"action": "done", "uncovered": []}
     restart(repo, scope)
-    # findings-first skips revisit findings; the capped revisit step serves them
-    item = progress.next_item(repo)
+    # the findings step skips revisit findings; the capped revisit step serves them, in the
+    # findings phase after the quiz
+    asked, item = drain_asks(repo, load_progress(repo)["current"]["session_id"])
+    assert asked == ["q-c1-1", "q-c2-1"]  # session 1 asked the foundational q-*-2
     assert item["action"] == "ladder" and item["concept_id"] == "f1"
     assert item["rung"] == 1 and item["announce"] is False and item["revisit"] is True
     sid2 = load_progress(repo)["current"]["session_id"]
@@ -299,20 +313,20 @@ def test_revealed_finding_goes_to_revisit_queue_not_findings_first(tmp_path):
     item = progress.next_item(repo)
     assert item["action"] == "ladder" and item["concept_id"] == "f2" and item["revisit"] is True
     finish_ladder(repo, sid2, "f2", revealed=True)
-    item = progress.next_item(repo)
-    assert item["action"] != "ladder" and item["concept_id"] == "c1"  # cap of 2 reached
+    assert progress.next_item(repo)["action"] == "done"
     assert load_progress(repo)["findings"]["f1"]["status"] == "completed"
 
 
-def test_ladder_progress_resumes_at_saved_rung(tmp_path):
+def test_ladder_progress_resumes_at_saved_rung_in_the_findings_phase(tmp_path):
     f = finding("f1", rungs=4)
-    repo, scope, s = start_diff(tmp_path, make_bank(["c1"], [f]))
-    assert progress.next_item(repo)["rung"] == 1
+    repo, scope, s = start_diff(tmp_path, make_bank(["c1"], [f], per_concept=2))
+    assert drain_asks(repo, s["session_id"])[1]["rung"] == 1
     r = progress.record(repo, rec(s["session_id"], "f1", None, "dont_know", kind="ladder_progress",
                                   qkind="finding", ladder_rung_reached=2, ladder_length=4))
     assert r["concept_status"] == "in_progress"
-    restart(repo, scope)
-    item = progress.next_item(repo)
+    s2 = restart(repo, scope)
+    asked, item = drain_asks(repo, s2["session_id"])
+    assert asked == ["q-c1-1"]  # the quiz first, not the ladder
     assert item["action"] == "ladder" and item["rung"] == 2
     assert item["step"] == f["ladder"][1] and item["announce"] is False
 
@@ -361,7 +375,7 @@ def test_stale_finding_marked_recheck_and_served_verify_fix(tmp_path):
     assert r["concept_status"] == "open"
     assert "prev_status" not in load_progress(repo)["findings"]["f2"]
     bank.seal(repo, diff_bank_path(repo, scope))
-    item = progress.next_item(repo)
+    item = drain_asks(repo, s2["session_id"])[1]
     assert item["action"] == "ladder" and item["concept_id"] == "f2"
 
 
@@ -472,7 +486,7 @@ def test_resume_returns_same_ask_until_recorded(tmp_path):
     repo, scope, s = start_diff(tmp_path, make_bank(["c1", "c2"], per_concept=2))
     first = progress.next_item(repo)
     assert progress.next_item(repo) == first
-    assert load_progress(repo)["concepts"]["c1"]["asked_question_ids"] == ["q-c1-1"]
+    assert load_progress(repo)["concepts"]["c1"]["asked_question_ids"] == ["q-c1-2"]  # foundational
     answer_ask(repo, s["session_id"], first, "correct")
     assert progress.next_item(repo)["question"]["concept_id"] == "c2"
 
@@ -654,7 +668,7 @@ def test_pending_findings_request_verification_first(tmp_path):
         "concept_ids": ["f1", "f2"]}
     b["findings"] = [dict(b["findings"][0], verdict="confirmed")]
     write_bank(diff_bank_path(repo, scope), b)
-    item = progress.next_item(repo)
+    item = drain_asks(repo, s["session_id"])[1]
     assert item["action"] == "ladder" and item["concept_id"] == "f1"
 
 
@@ -704,8 +718,10 @@ def test_quick_limit_holds_when_every_answer_is_skipped(tmp_path):
 
 def test_thorough_skipped_concept_gets_second_question(tmp_path):
     repo, scope, s = start_diff(tmp_path, make_bank(["a", "b"], per_concept=3), "thorough")
-    answer_ask(repo, s["session_id"], progress.next_item(repo), "skipped")
-    assert progress.next_item(repo)["question"]["id"] == "q-a-2"
+    item = progress.next_item(repo)
+    assert item["question"]["id"] == "q-a-2"  # foundational first
+    answer_ask(repo, s["session_id"], item, "skipped")
+    assert progress.next_item(repo)["question"]["id"] == "q-a-1"
 
 
 def test_rebuild_of_topic_map_only_concept_targets_module_bank(tmp_path):
@@ -804,9 +820,9 @@ def test_cli_bank_promote_only_moves_valid_builds(tmp_path):
     assert code == 2 and out["error"] == "state_corrupt" and not (Path(repo) / "app.json").exists()
 
 
-def test_in_progress_ladder_resumes_first_in_a_session_of_another_scope(tmp_path):
-    """A ladder stopped partway in project mode resumes at its rung as the first item of the
-    next session, even a diff session whose bank is not built yet."""
+def test_in_progress_ladder_resumes_in_the_findings_phase_of_another_scope(tmp_path):
+    """A ladder stopped partway in project mode resumes at its rung in the findings phase of
+    the next session, even a diff session whose own bank holds no findings."""
     repo = diff_repo(tmp_path, {"auth.py": LINES})
     s = progress.start_session(repo, digest.Scope("project"), None)
     pdir = Path(repo) / ".enguru" / "banks" / "project"
@@ -814,7 +830,7 @@ def test_in_progress_ladder_resumes_first_in_a_session_of_another_scope(tmp_path
     write_bank(pdir / "topic-map.json",
                {"modules": [{"id": "m1", "title": "M1", "concepts": [concept("a")]}]})
     write_bank(pdir / "m1.json", make_bank(["a"], [f], scope_key="project"))
-    assert progress.next_item(repo)["rung"] == 1
+    assert drain_asks(repo, s["session_id"], scope="project")[1]["rung"] == 1
     progress.record(repo, rec(s["session_id"], "m1-f", None, "incorrect", kind="ladder_progress",
                               qkind="finding", ladder_rung_reached=2, ladder_length=4,
                               scope="project"))
@@ -822,13 +838,16 @@ def test_in_progress_ladder_resumes_first_in_a_session_of_another_scope(tmp_path
     assert [u["concept_id"] for u in out["undisclosed_critical"]] == ["m1-f"]
     scope = diff_scope(repo)
     s2 = progress.start_session(repo, scope, "quick")
-    item = progress.next_item(repo)
+    assert progress.next_item(repo)["action"] == "build_diff_bank"
+    write_bank(diff_bank_path(repo, scope), make_bank(["d1"]))
+    asked, item = drain_asks(repo, s2["session_id"])
+    assert asked == ["q-d1-1"]
     assert item["action"] == "ladder" and item["concept_id"] == "m1-f"
     assert item["rung"] == 2 and item["step"] == f["ladder"][1] and item["announce"] is False
-    # once answered this session it is not served again; the diff flow continues
+    # once answered this session it is not served again
     progress.record(repo, rec(s2["session_id"], "m1-f", None, "dont_know", qkind="finding",
                               ladder_rung_reached=4, ladder_length=4, revealed=True))
-    assert progress.next_item(repo)["action"] == "build_diff_bank"
+    assert progress.next_item(repo) == {"action": "done", "uncovered": []}
 
 
 def test_cli_record_and_keylog_take_json_as_an_argument(tmp_path):
@@ -884,9 +903,9 @@ def _project_session_with_module(repo):
 def test_resume_skips_finding_whose_file_is_missing_in_the_checkout(tmp_path):
     repo = _diff_finding_in_progress(tmp_path, "gone.py")
     (Path(repo) / "gone.py").unlink()  # e.g. another branch checked out
-    _project_session_with_module(repo)
-    item = progress.next_item(repo)
-    assert item["action"] == "ask" and item["question"]["concept_id"] == "a"
+    s = _project_session_with_module(repo)
+    asked, item = drain_asks(repo, s["session_id"], scope="project")
+    assert asked == ["q-a-1"] and item == {"action": "done", "uncovered": []}
     p = load_progress(repo)
     assert p["current"]["skipped"]["d-f"] == "finding_file_missing"
     assert p["findings"]["d-f"] == {"status": "in_progress", "rung": 2}  # kept for later
@@ -896,16 +915,16 @@ def test_resume_retires_finding_whose_code_is_all_gone(tmp_path):
     repo = _diff_finding_in_progress(tmp_path, "gone.py")
     for name in ("gone.py", "keep.py", "app.py"):  # every file its evidence hashes cover
         (Path(repo) / name).unlink()
-    _project_session_with_module(repo)
-    assert progress.next_item(repo)["question"]["concept_id"] == "a"
+    s = _project_session_with_module(repo)
+    assert drain_asks(repo, s["session_id"], scope="project")[0] == ["q-a-1"]
     assert load_progress(repo)["concepts"]["d-f"]["status"] == "retired"
 
 
 def test_resume_marks_changed_finding_for_recheck(tmp_path):
     repo = _diff_finding_in_progress(tmp_path, "mod.py")
     (Path(repo) / "mod.py").write_text(LINES + "changed\n")
-    _project_session_with_module(repo)
-    assert progress.next_item(repo)["question"]["concept_id"] == "a"
+    s = _project_session_with_module(repo)
+    assert drain_asks(repo, s["session_id"], scope="project")[0] == ["q-a-1"]
     st = load_progress(repo)["findings"]["d-f"]
     assert st["status"] == "recheck" and st["prev_status"] == "in_progress" and st["rung"] == 2
 
@@ -933,13 +952,14 @@ def test_critical_resumed_cross_scope_and_stopped_is_still_undisclosed(tmp_path)
     write_bank(pdir / "topic-map.json",
                {"modules": [{"id": "m1", "title": "M1", "concepts": [concept("a")]}]})
     write_bank(pdir / "m1.json", make_bank(["a"], [f], scope_key="project"))
-    assert progress.next_item(repo)["rung"] == 1
+    assert drain_asks(repo, s["session_id"], scope="project")[1]["rung"] == 1
     progress.record(repo, rec(s["session_id"], "m1-f", None, "incorrect", kind="ladder_progress",
                               qkind="finding", ladder_rung_reached=2, ladder_length=4,
                               scope="project"))
     progress.end_session(repo)
     s2 = progress.start_session(repo, diff_scope(repo), "quick")
-    item = progress.next_item(repo)
+    write_bank(diff_bank_path(repo, diff_scope(repo)), make_bank(["d1"]))
+    item = drain_asks(repo, s2["session_id"])[1]
     assert item["action"] == "ladder" and item["concept_id"] == "m1-f" and item["rung"] == 2
     progress.record(repo, rec(s2["session_id"], "m1-f", None, "incorrect", kind="ladder_progress",
                               qkind="finding", ladder_rung_reached=3, ladder_length=4))
@@ -984,3 +1004,199 @@ def test_cli_next_deletes_stale_build_work_file(tmp_path):
     item = run_cli(["next"], repo)
     assert item["action"] == "build_diff_bank"
     assert Path(repo, item["out_path"]) == stale and not stale.exists()
+
+
+# ------------------------------------------------- progressive order (phases)
+
+PHASE_DIFFICULTY = {"explain_it": "foundational", "what_if": "intermediate",
+                    "spot_the_flaw": "advanced", "review_diff": "advanced"}
+ALL_PHASES = ("explain_it", "what_if", "spot_the_flaw")
+
+
+def phased_questions(cid, styles=ALL_PHASES):
+    """One question per style (a style may repeat), listed deepest first so that bank order
+    never explains the phase order."""
+    seen = {}
+    out = []
+    for st in styles:
+        seen[st] = seen.get(st, 0) + 1
+        out.append(question("q-%s-%s%d" % (cid, st, seen[st]), cid, PHASE_DIFFICULTY[st], st))
+    return list(reversed(out))
+
+
+def phased_bank(spec, findings=(), scope_key="diff"):
+    """spec: {cid: styles}."""
+    concepts = [concept(cid) for cid in spec]
+    questions = [q for cid, styles in spec.items() for q in phased_questions(cid, styles)]
+    for f in findings:
+        concepts.append(concept(f["concept_id"], kind="finding", risk=1))
+        questions.append(question("q-%s-fb" % f["concept_id"], f["concept_id"]))
+    return {"scope_key": scope_key, "concepts": concepts, "questions": questions,
+            "findings": list(findings)}
+
+
+def phased_project(tmp_path, spec, findings=()):
+    repo = diff_repo(tmp_path)
+    pdir = Path(repo) / ".enguru" / "banks" / "project"
+    m1 = [concept(c) for c in spec] + [concept(f["concept_id"]) for f in findings]
+    write_bank(pdir / "topic-map.json", {"modules": [
+        {"id": "m1", "title": "M1", "concepts": m1},
+        {"id": "m2", "title": "M2", "concepts": [concept("z", module="m2")]}]})
+    write_bank(pdir / "m1.json", phased_bank(spec, findings, scope_key="project"))
+    s = progress.start_session(repo, digest.Scope("project"), None)
+    return repo, s
+
+
+def run_asks(repo, sid, outcomes=None, default="correct", scope="diff"):
+    """Answer asks until another action; outcomes maps question id -> outcome."""
+    asked = []
+    while True:
+        item = progress.next_item(repo)
+        if item["action"] != "ask":
+            return asked, item
+        qid = item["question"]["id"]
+        asked.append(qid)
+        answer_ask(repo, sid, item, (outcomes or {}).get(qid, default), scope=scope)
+
+
+def test_project_mode_explain_then_what_if_then_flaw_then_findings(tmp_path):
+    spec = {"a": ALL_PHASES, "b": ("explain_it", "what_if", "review_diff")}
+    repo, s = phased_project(tmp_path, spec, [finding("f", "critical")])
+    asked, item = run_asks(repo, s["session_id"], scope="project")
+    assert asked == ["q-a-explain_it1", "q-b-explain_it1", "q-a-what_if1", "q-b-what_if1",
+                     "q-a-spot_the_flaw1", "q-b-review_diff1"]
+    assert item["action"] == "ladder" and item["concept_id"] == "f" and item["announce"] is True
+    finish_ladder(repo, s["session_id"], "f")
+    assert progress.next_item(repo) == {"action": "done", "uncovered": []}
+    p = load_progress(repo)
+    assert p["concepts"]["a"]["status"] == "solid" and p["concepts"]["a"]["phase_passed"] == 3
+
+
+def test_failed_explain_gates_the_later_phases_this_session(tmp_path):
+    spec = {"a": ("explain_it", "explain_it", "what_if", "spot_the_flaw"), "b": ALL_PHASES}
+    repo, s = phased_project(tmp_path, spec)
+    asked, item = run_asks(repo, s["session_id"], {"q-a-explain_it2": "incorrect"},
+                           scope="project")
+    # both explain questions are foundational: bank order breaks the tie (q-a-explain_it2
+    # is listed first)
+    assert asked == ["q-a-explain_it2", "q-b-explain_it1", "q-b-what_if1", "q-b-spot_the_flaw1"]
+    assert item == {"action": "done", "uncovered": []}
+    p = load_progress(repo)
+    assert p["concepts"]["a"]["status"] == "open" and p["concepts"]["a"].get("phase_passed", 0) == 0
+    s2 = restart(repo, digest.Scope("project"), None)
+    assert s2["module_id"] == "m1"
+    asked, _ = run_asks(repo, s2["session_id"], scope="project")
+    assert asked == ["q-a-explain_it1", "q-a-what_if1", "q-a-spot_the_flaw1"]
+
+
+def test_skipped_explain_gates_the_later_phases_this_session(tmp_path):
+    repo, s = phased_project(tmp_path, {"a": ALL_PHASES})
+    asked, item = run_asks(repo, s["session_id"], {"q-a-explain_it1": "skipped"},
+                           scope="project")
+    assert asked == ["q-a-explain_it1"] and item["action"] == "done"
+
+
+def test_partial_passes_the_gate(tmp_path):
+    repo, s = phased_project(tmp_path, {"a": ALL_PHASES})
+    asked, _ = run_asks(repo, s["session_id"], default="partial", scope="project")
+    assert asked == ["q-a-explain_it1", "q-a-what_if1", "q-a-spot_the_flaw1"]
+    c = load_progress(repo)["concepts"]["a"]
+    assert c["status"] == "open" and c["phase_passed"] == 3
+
+
+def test_solid_needs_correct_on_the_deepest_phase(tmp_path):
+    spec = {"a": ("explain_it", "what_if", "what_if"), "e": ("explain_it",)}
+    repo, scope, s = start_diff(tmp_path, phased_bank(spec), "thorough")
+    sid = s["session_id"]
+
+    def answer(cid, qid, style, outcome):
+        return progress.record(repo, rec(sid, cid, qid, outcome, style=style))["concept_status"]
+
+    assert answer("a", "q-a-explain_it1", "explain_it", "correct") == "open"
+    assert load_progress(repo)["concepts"]["a"]["phase_passed"] == 1
+    assert answer("a", "q-a-what_if1", "what_if", "partial") == "open"
+    assert load_progress(repo)["concepts"]["a"]["phase_passed"] == 2
+    assert answer("a", "q-a-what_if2", "what_if", "correct") == "solid"
+    assert answer("e", "q-e-explain_it1", "explain_it", "correct") == "solid"  # explain only
+    assert progress.end_session(repo)["solid"] == ["a", "e"]
+
+
+def test_correct_on_a_lower_phase_clears_revisit_but_is_not_solid(tmp_path):
+    repo, scope, s = start_diff(tmp_path, phased_bank({"a": ALL_PHASES}))
+    sid = s["session_id"]
+    progress.record(repo, rec(sid, "a", "q-a-explain_it1", "skipped"))
+    assert load_progress(repo)["revisit"] == ["a"]
+    r = progress.record(repo, rec(sid, "a", "q-a-explain_it1", "correct"))
+    assert r["concept_status"] == "open" and load_progress(repo)["revisit"] == []
+
+
+def test_module_advances_once_every_concept_is_solid_on_its_deepest_phase(tmp_path):
+    repo, s = phased_project(tmp_path, {"a": ("explain_it", "what_if", "what_if")})
+    asked, _ = run_asks(repo, s["session_id"], {"q-a-what_if2": "partial"}, scope="project")
+    assert asked == ["q-a-explain_it1", "q-a-what_if2"]
+    s2 = restart(repo, digest.Scope("project"), None)
+    assert s2["module_id"] == "m1"  # correct on explain alone is not solid
+    asked, item = run_asks(repo, s2["session_id"], scope="project")
+    assert asked == ["q-a-what_if1"] and item["action"] == "done"
+    assert restart(repo, digest.Scope("project"), None)["module_id"] == "m2"
+
+
+def test_concept_without_a_phase_skips_it_and_no_rebuild_is_requested(tmp_path):
+    spec = {"a": ("explain_it", "spot_the_flaw"), "b": ("what_if",)}
+    repo, s = phased_project(tmp_path, spec)
+    asked, item = run_asks(repo, s["session_id"], scope="project")
+    assert asked == ["q-a-explain_it1", "q-b-what_if1", "q-a-spot_the_flaw1"]
+    assert item == {"action": "done", "uncovered": []}
+
+
+def test_diff_thorough_serves_phase_by_phase_across_the_window(tmp_path):
+    spec = {"c0": ALL_PHASES, "c1": ("explain_it", "explain_it", "what_if"), "c2": ALL_PHASES}
+    repo, scope, s = start_diff(tmp_path, phased_bank(spec), "thorough")
+    asked, item = run_asks(repo, s["session_id"], {"q-c1-explain_it2": "incorrect"},
+                           default="partial")
+    # c1 failed its explain question: its 2nd question stays in phase 1 (easiest first)
+    assert asked == ["q-c0-explain_it1", "q-c1-explain_it2", "q-c1-explain_it1",
+                     "q-c2-explain_it1", "q-c0-what_if1", "q-c2-what_if1"]
+    assert item == {"action": "done", "uncovered": []}
+
+
+def test_diff_quick_takes_each_concepts_earliest_phase(tmp_path):
+    spec = {"c0": ALL_PHASES, "c1": ("what_if", "spot_the_flaw"), "c2": ("explain_it",)}
+    repo, scope, s = start_diff(tmp_path, phased_bank(spec, [finding("f1")]), "quick")
+    asked, item = run_asks(repo, s["session_id"], default="partial")
+    assert asked == ["q-c0-explain_it1", "q-c2-explain_it1", "q-c1-what_if1"]
+    assert item["action"] == "ladder" and item["concept_id"] == "f1"
+
+
+def test_revisit_warm_up_uses_the_phase_picker(tmp_path):
+    repo, scope, s = start_diff(tmp_path, phased_bank({"r": ALL_PHASES, "n": ALL_PHASES}))
+    sid = s["session_id"]
+    progress.record(repo, rec(sid, "r", "q-r-explain_it1", "partial", followups_used=3))
+    assert load_progress(repo)["revisit"] == ["r"]
+    s2 = restart(repo, scope)
+    asked, _ = run_asks(repo, s2["session_id"], default="partial")
+    assert asked[0] == "q-r-what_if1"  # warm-up first, at the phase it reached
+    assert asked[1:] == ["q-n-explain_it1"]
+
+
+def test_session_stopped_before_the_findings_phase_still_discloses(tmp_path):
+    repo = diff_repo(tmp_path, {"auth.py": LINES})
+    s = progress.start_session(repo, digest.Scope("project"), None)
+    pdir = Path(repo) / ".enguru" / "banks" / "project"
+    f = finding("m1-f", "critical", rungs=4, file="auth.py")
+    write_bank(pdir / "topic-map.json",
+               {"modules": [{"id": "m1", "title": "M1", "concepts": [concept("a")]}]})
+    write_bank(pdir / "m1.json", make_bank(["a"], [f], scope_key="project"))
+    assert drain_asks(repo, s["session_id"], scope="project")[1]["rung"] == 1
+    progress.record(repo, rec(s["session_id"], "m1-f", None, "incorrect", kind="ladder_progress",
+                              qkind="finding", ladder_rung_reached=2, ladder_length=4,
+                              scope="project"))
+    progress.end_session(repo)
+    scope = diff_scope(repo)
+    s2 = progress.start_session(repo, scope, "quick")
+    write_bank(diff_bank_path(repo, scope),
+               make_bank(["d1", "d2"], [finding("d-crit", "critical")]))
+    item = progress.next_item(repo)
+    answer_ask(repo, s2["session_id"], item)  # then stop, before the findings phase
+    out = progress.end_session(repo)
+    assert sorted(u["concept_id"] for u in out["undisclosed_critical"]) == ["d-crit", "m1-f"]
