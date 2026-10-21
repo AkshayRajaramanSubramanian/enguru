@@ -1,0 +1,14 @@
+{
+  "name": "enguru",
+  "description": "The enguru plugin: interviews you about your own vibe-coded project.",
+  "owner": {
+    "name": "Akshay Rajaraman Subramanian"
+  },
+  "plugins": [
+    {
+      "name": "enguru",
+      "source": "./",
+      "description": "Interviews you about your vibe-coded project so you understand and can review it; issues a skills certificate."
+    }
+  ]
+}

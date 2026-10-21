@@ -1,0 +1,16 @@
+[
+ {"message": "Scaffold: express app, sqlite schema, opaque-token auth",
+  "branch": "main",
+  "files": ["package.json", {"path": "README.md", "from": "history/README.v1.md"},
+            {"path": "src/db.js", "from": "history/db.v1.js"}, "src/auth.js"]},
+ {"message": "Notes CRUD endpoints with per-user ownership",
+  "branch": "main",
+  "files": [{"path": "src/routes/notes.js", "from": "history/notes.v1.js"},
+            {"path": "src/app.js", "from": "history/app.v1.js"}]},
+ {"message": "Fix notes list skipping the first page",
+  "branch": "main",
+  "files": ["src/routes/notes.js"]},
+ {"message": "Add per-user tags on notes",
+  "branch": "feature/note-tags",
+  "files": ["src/db.js", "src/routes/tags.js", "src/app.js", "README.md"]}
+]
