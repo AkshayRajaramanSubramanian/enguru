@@ -305,10 +305,21 @@ def set_intensity(repo, intensity) -> dict:
     return {"ok": True, "intensity": intensity}
 
 
-def _latest_certificate_date(repo):
+def _counts_since_certificate(repo):
+    """A predicate on answer timestamps: newer than the latest certificate. Uses the
+    certificate's saved_at when it has one, else the end of its date."""
     d = Path(repo) / paths.STATE_DIRNAME / "certificates"
     dates = [p.stem for p in d.glob("*.json") if _CERT_NAME.match(p.stem)] if d.is_dir() else []
-    return max(dates) if dates else None
+    if not dates:
+        return lambda ts: True
+    last = max(dates)
+    try:
+        saved_at = paths.read_json(d / (last + ".json")).get("saved_at")
+    except (paths.StateCorrupt, OSError, ValueError, AttributeError):
+        saved_at = None
+    if isinstance(saved_at, str) and saved_at:
+        return lambda ts: ts > saved_at
+    return lambda ts: ts[:10] > last
 
 
 def end_session(repo, now=None) -> dict:
@@ -351,10 +362,10 @@ def end_session(repo, now=None) -> dict:
                 c = idx["concepts"].get(cid, {}).get("concept", {})
                 undisclosed.append({"concept_id": cid, "title": c.get("title", ""),
                                     "file": f["lines"]["file"]})
-    since = _latest_certificate_date(repo)
+    newer = _counts_since_certificate(repo)
     scored = sum(1 for a in prog["answers"]
                  if a["kind"] == "answer" and a.get("outcome") != "skipped"
-                 and (since is None or a["timestamp"][:10] > since))
+                 and newer(a["timestamp"]))
     current = prog["current"]
     if current and session:
         session["ended"] = now or _now()
@@ -678,6 +689,12 @@ def _kind_rules(rec):
         for k in ("question_kind", "outcome"):
             if k not in rec:
                 errs.append("$: answer record needs '%s'" % k)
+        if rec.get("question_kind") == "quiz":
+            for k in ("style", "skill", "difficulty"):
+                if k not in rec:
+                    errs.append("$: quiz answer record needs '%s'" % k)
+            if not isinstance(rec.get("question_id"), str) or not rec["question_id"]:
+                errs.append("$: quiz answer record needs a string 'question_id'")
     elif kind == "ladder_progress":
         if not isinstance(rec.get("ladder_rung_reached"), int):
             errs.append("$: ladder_progress record needs integer 'ladder_rung_reached'")

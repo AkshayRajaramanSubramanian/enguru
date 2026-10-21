@@ -251,6 +251,12 @@ def cert_levels(repo, save=False, today=None) -> dict:
                          "rung": st.get("rung", 1),
                          "ladder_length": len(ladder) if isinstance(ladder, list) else None,
                          "discovered_at": _discovered_at(prog["answers"], cid)})
+    for cid, f in bank_f.items():  # confirmed but never started: open
+        if cid not in prog["findings"]:
+            ladder = f.get("ladder")
+            findings.append({"concept_id": cid, "status": "open", "rung": 1,
+                             "ladder_length": len(ladder) if isinstance(ladder, list) else None,
+                             "discovered_at": None})
     open_critical = sum(
         1 for cid, f in bank_f.items()
         if f.get("severity") == "critical"
@@ -267,5 +273,7 @@ def cert_levels(repo, save=False, today=None) -> dict:
     if save:
         cert = paths.state_dir(repo) / "certificates"
         cert.mkdir(parents=True, exist_ok=True)
-        paths.atomic_write_json(cert / ("%s.json" % today), dict(out, date=today))
+        saved_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        paths.atomic_write_json(cert / ("%s.json" % today),
+                                dict(out, date=today, saved_at=saved_at))
     return out

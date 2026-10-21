@@ -256,7 +256,17 @@ def cmd_session_set_intensity(args):
 
 def cmd_next(args):
     from enguru_lib import progress
-    emit(_progress_call(progress.next_item, _repo_root(os.getcwd())))
+    repo = _repo_root(os.getcwd())
+    out = _progress_call(progress.next_item, repo)
+    if out.get("action", "").startswith("build_") or out.get("action") == "rebuild_concept":
+        # A work file left by an earlier run must never be validated as this run's output.
+        work = _bank_path(repo, out["out_path"])
+        _inside_state(repo, work, "out_path")
+        try:
+            work.unlink()
+        except FileNotFoundError:
+            pass
+    emit(out)
 
 
 def cmd_record(args):

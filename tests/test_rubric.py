@@ -288,3 +288,27 @@ def test_cert_levels_evidence_is_the_windowed_records(tmp_path):
     by_id = {f["concept_id"]: f for f in out["findings"]}
     assert by_id["f1"]["status"] == "fixed" and by_id["f1"]["discovered_at"] == 2
     assert by_id["f2"]["discovered_at"] is None
+
+
+def test_cert_findings_include_confirmed_findings_never_started(tmp_path):
+    sd = tmp_path / ".enguru"
+    _write(sd / "progress.json", {"version": 1, "sessions": [], "answers": [], "concepts": {},
+                                  "revisit": [], "findings": {"f1": {"status": "completed", "rung": 1}},
+                                  "current": None})
+    _write(sd / "banks" / "diff" / "r0.json", {"findings": [
+        {"concept_id": "f1", "verdict": "confirmed", "severity": "major", "ladder": ["a"]},
+        {"concept_id": "f2", "verdict": "confirmed", "severity": "critical", "ladder": ["a", "b"]},
+        {"concept_id": "f3", "verdict": "pending", "severity": "critical", "ladder": ["a"]}]})
+    out = rubric.cert_levels(tmp_path)
+    by_id = {f["concept_id"]: f for f in out["findings"]}
+    assert set(by_id) == {"f1", "f2"}
+    assert by_id["f2"] == {"concept_id": "f2", "status": "open", "rung": 1, "ladder_length": 2,
+                           "discovered_at": None}
+    assert out["open_critical"] == 1
+
+
+def test_saved_certificate_records_saved_at(tmp_path):
+    out = rubric.cert_levels(tmp_path, save=True, today="2026-10-21")
+    data = json.loads((tmp_path / ".enguru" / "certificates" / "2026-10-21.json").read_text())
+    assert data["date"] == "2026-10-21" and data["saved_at"].startswith("20")
+    assert data["saved_at"].endswith("Z") and "saved_at" not in out

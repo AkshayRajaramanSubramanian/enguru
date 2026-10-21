@@ -143,3 +143,9 @@ def test_certificate_skill():
 def test_interview_skill_batches_extractors():
     body = (ROOT / "skills" / "interview" / "SKILL.md").read_text()
     assert "at most 6 per message" in body and "all in a single message" not in body
+
+
+def test_interview_skill_handles_missing_python_and_skipped_lines():
+    body = (ROOT / "skills" / "interview" / "SKILL.md").read_text()
+    assert "python3: command not found" in body and "python.org/downloads" in body
+    assert "skipped_lines" in body

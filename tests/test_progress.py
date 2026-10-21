@@ -946,3 +946,41 @@ def test_critical_resumed_cross_scope_and_stopped_is_still_undisclosed(tmp_path)
     out = progress.end_session(repo)
     assert out["undisclosed_critical"] == [
         {"concept_id": "m1-f", "title": "Title m1-f", "file": "auth.py"}]
+
+
+def test_same_day_answers_after_certificate_count(tmp_path, monkeypatch):
+    repo, scope, s = start_diff(tmp_path, make_bank(["c1"]))
+    sid = s["session_id"]
+    for t in ("2026-10-21T09:00:00Z", "2026-10-21T11:00:00Z", "2026-10-21T12:00:00Z"):
+        monkeypatch.setattr(progress, "_now", lambda t=t: t)
+        progress.record(repo, rec(sid, "c1", "q-c1-1", "partial"))
+    cert = Path(repo) / ".enguru" / "certificates"
+    cert.mkdir(parents=True)
+    (cert / "2026-10-21.json").write_text(json.dumps({"date": "2026-10-21",
+                                                      "saved_at": "2026-10-21T10:00:00Z"}))
+    assert progress.end_session(repo)["scored_since_last_certificate"] == 2
+
+
+def test_quiz_answer_record_requires_question_fields(tmp_path):
+    repo, scope, s = start_diff(tmp_path, make_bank(["c1"]))
+    sid = s["session_id"]
+    for missing in ("style", "skill", "difficulty", "question_id"):
+        r = rec(sid, "c1", "q-c1-1", "partial")
+        del r[missing]
+        with pytest.raises(progress.ProgressError) as e:
+            progress.record(repo, r)
+        assert e.value.code == "state_corrupt" and missing in e.value.message
+    with pytest.raises(progress.ProgressError):
+        progress.record(repo, rec(sid, "c1", None, "partial"))  # null question_id
+    progress.record(repo, rec(sid, "c1", "q-c1-1", "partial"))
+
+
+def test_cli_next_deletes_stale_build_work_file(tmp_path):
+    repo = diff_repo(tmp_path)
+    s = run_cli(["session", "start", "--diff", "--range", "HEAD~1..HEAD", "--quick"], repo)
+    stale = Path(repo) / ".enguru" / "work" / ("build-diff-%s.json" % s["range_id"])
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text(json.dumps(make_bank(["old"])))
+    item = run_cli(["next"], repo)
+    assert item["action"] == "build_diff_bank"
+    assert Path(repo, item["out_path"]) == stale and not stale.exists()

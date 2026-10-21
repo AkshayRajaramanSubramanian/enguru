@@ -29,7 +29,7 @@ Every record and keylog template in this skill and its references is one physica
 
 ## 1. Check
 
-Run `enguru check`. On `python_too_old`, relay the message (it includes the install link) and stop. If `transcripts_dir` is false, remember to tell the developer in step 3.
+Run `enguru check`. On `python_too_old`, relay the message (it includes the install link) and stop. If the shell says `python3: command not found` (or similar, exit code 127), tell the developer: "Enguru needs Python 3.9 or newer. Install it from https://www.python.org/downloads/ and run the interview again." and stop. If `transcripts_dir` is false, remember to tell the developer in step 3.
 
 ## 2. Parse `$ARGUMENTS` and start the session
 
@@ -56,7 +56,7 @@ Add `--quick` or `--thorough` to `session start` only if the developer gave it (
 1. Run `enguru digest prep <scope flags>`. It returns `pending` chunks (`chunk_id`, `chunk_path`, `out_path`).
 2. If any are pending, dispatch one `enguru:decision-extractor` per chunk, in batches of **at most 6 per message** (the agents in one message run in parallel; send the next batch once a batch replies). Prompt: `chunk_path: <chunk_path>` and `out_path: <out_path>`, nothing else. The CLI already caps how many chunks it hands out.
 3. Run `enguru digest merge`.
-4. In one line each, only if they apply: `fallback_chunks` is non-empty ("some sessions were read with keyword rules instead of the extractor"), or there were no transcripts (`transcripts_dir` false, or prep had no `pending` and no `cached`): "No coding-session transcripts found, so questions about why decisions were made will be limited."
+4. In one line each, only if they apply: `fallback_chunks` is non-empty ("some sessions were read with keyword rules instead of the extractor"), or there were no transcripts (`transcripts_dir` false, or prep had no `pending` and no `cached`): "No coding-session transcripts found, so questions about why decisions were made will be limited." If prep's `skipped_lines` is greater than 0: "<skipped_lines> transcript lines could not be read and were skipped."
 
 ## 4. Introduction
 
