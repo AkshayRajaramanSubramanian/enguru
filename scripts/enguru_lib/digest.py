@@ -22,6 +22,15 @@ _DEP_CMD = re.compile(
     r"\b(npm (?:i|install)|yarn add|pnpm add|pip install|poetry add|cargo add|go get|bundle add)\b")
 
 
+LIMITS_PATH = Path(__file__).resolve().parents[2] / "config" / "limits.json"
+
+
+def load_limits():
+    """Extractor fan-out limits: {max_sessions, max_chunks}."""
+    with open(LIMITS_PATH, encoding="utf-8") as f:
+        return json.load(f)["digest"]
+
+
 class DigestError(Exception):
     def __init__(self, code, message):
         super().__init__(message)
@@ -209,8 +218,7 @@ def prep(repo, scope, root):
     cache_dir = sd / "cache" / "extractor"
 
     sessions, skipped = transcripts.load_sessions(repo, root)
-    pending, cached, chunk_index, events = [], [], [], []
-    used = 0
+    relevant = []
     for s in sessions:
         if changed_paths is not None:
             overlap = any(transcripts.edited_files(t, repo) & changed_paths for t in s.turns)
@@ -219,6 +227,18 @@ def prep(repo, scope, root):
                 for t in s.turns)
             if not (overlap or in_window):
                 continue
+        relevant.append(s)
+    # Most recent sessions first; cap sessions and the chunks sent to the extractor.
+    limits = load_limits()
+    relevant.sort(key=lambda s: max((_ts_key(t.timestamp) for t in s.turns), default=_MIN_TS),
+                  reverse=True)
+    truncation = []
+    if len(relevant) > limits["max_sessions"]:
+        truncation.append("sessions:capped:%d/%d" % (limits["max_sessions"], len(relevant)))
+        relevant = relevant[:limits["max_sessions"]]
+    pending, cached, chunk_index, events = [], [], [], []
+    used, to_extract, over_cap = 0, 0, 0
+    for s in relevant:
         used += 1
         events.extend(_session_events(s, repo))
         cand = [t for i, t in enumerate(s.turns) if _candidate(s.turns, i)]
@@ -226,6 +246,11 @@ def prep(repo, scope, root):
             part = cand[k * CHUNK_TURNS:(k + 1) * CHUNK_TURNS]
             cid = "%s__%d" % (s.id, k)
             is_cached = (cache_dir / ("%s__%d.json" % (s.content_hash, k))).exists()
+            if not is_cached:
+                if to_extract >= limits["max_chunks"]:
+                    over_cap += 1
+                    continue
+                to_extract += 1
             chunk_index.append({"chunk_id": cid, "content_hash": s.content_hash, "k": k,
                                 "session_id": s.id, "turn_ids": [t.id for t in part],
                                 "turn_timestamps": {t.id: t.timestamp for t in part},
@@ -241,6 +266,8 @@ def prep(repo, scope, root):
             paths.atomic_write_json(cpath, chunk)
             pending.append({"chunk_id": cid, "chunk_path": str(cpath),
                             "out_path": str(out_dir / (cid + ".json"))})
+    if over_cap:
+        truncation.append("chunks:capped:%d/%d" % (to_extract, to_extract + over_cap))
 
     events.extend(_git_events(commits))
     git = {}
@@ -252,7 +279,7 @@ def prep(repo, scope, root):
         "scope": asdict(scope), "events": events, "git": git,
         "file_map": gitinfo.file_map(repo), "diff": diff,
         "sessions_found": len(sessions), "sessions_used": used,
-        "skipped_lines": skipped})
+        "skipped_lines": skipped, "truncation": truncation})
     paths.atomic_write_json(work / "prep.json", {"chunks": chunk_index})
     return {"pending": pending, "cached": cached, "skipped_lines": skipped}
 
@@ -548,7 +575,7 @@ def merge(repo):
                  "sessions_found": rules["sessions_found"], "sessions_used": rules["sessions_used"],
                  "events_kept": len(events), "events_dropped": dropped,
                  "fallback_chunks": fallback, "skipped_lines": rules["skipped_lines"],
-                 "truncation": []},
+                 "truncation": list(rules.get("truncation", []))},
         "file_map": rules["file_map"], "git": rules["git"], "events": events, "diff": diff}
     apply_budget(result)
     errors = schema.validate(result, schema.load_schema("digest"))

@@ -190,3 +190,30 @@ def test_cli_uncommitted_session_with_only_untracked_and_no_commits(tmp_path):
     assert s["scope"] == "diff" and s["range_id"].startswith("worktree-")
     code, out = run_cli_raw(["session", "start", "--diff", "--takeover"], r)
     assert code == 2 and out["error"] == "no_base" and "failed" not in out["message"]
+
+
+def test_extractor_fan_out_capped_to_recent_sessions_and_chunks(tmp_path, monkeypatch):
+    r = make_repo(tmp_path, [{"a.py": "x = 1\n"}], ["init"])
+    root = tmp_path / "tx"
+    enc = transcripts.encode_project_dir(r)
+    c = str(r)
+    for n in range(3):  # s0 oldest ... s2 newest; 3 one-turn chunks each
+        write_transcript(root, enc, "s%d" % n, [
+            user("request %d-%d" % (n, k), cwd=c, uuid="u%d-%d" % (n, k), session_id="s%d" % n,
+                 ts="2026-10-0%dT12:0%d:00.000Z" % (n + 1, k)) for k in range(3)])
+    monkeypatch.setattr(digest, "CHUNK_TURNS", 1)
+    monkeypatch.setattr(digest, "load_limits", lambda: {"max_sessions": 2, "max_chunks": 4})
+    out = _prep(r, root)
+    assert [p["chunk_id"] for p in out["pending"]] == ["s2__0", "s2__1", "s2__2", "s1__0"]
+    rules = _rules(r)
+    assert rules["sessions_used"] == 2
+    assert rules["truncation"] == ["sessions:capped:2/3", "chunks:capped:4/6"]
+    prep = json.loads((r / ".enguru/work/prep.json").read_text())
+    assert [c["chunk_id"] for c in prep["chunks"]] == ["s2__0", "s2__1", "s2__2", "s1__0"]
+    res = digest.merge(r)
+    assert res["truncation"][:2] == ["sessions:capped:2/3", "chunks:capped:4/6"]
+
+
+def test_default_fan_out_limits_in_config():
+    lim = digest.load_limits()
+    assert lim == {"max_sessions": 12, "max_chunks": 12}

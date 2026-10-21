@@ -138,3 +138,8 @@ def test_certificate_skill():
     for word in ("`evidence`", "`discovered_at`", "(was Novice) ↑", "(was Developing) ↓",
                  "(unchanged) →", "(first certificate)"):
         assert word in body, word
+
+
+def test_interview_skill_batches_extractors():
+    body = (ROOT / "skills" / "interview" / "SKILL.md").read_text()
+    assert "at most 6 per message" in body and "all in a single message" not in body

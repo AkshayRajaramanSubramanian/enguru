@@ -54,7 +54,7 @@ Add `--quick` or `--thorough` to `session start` only if the developer gave it (
 ## 3. Digest
 
 1. Run `enguru digest prep <scope flags>`. It returns `pending` chunks (`chunk_id`, `chunk_path`, `out_path`).
-2. If any are pending, dispatch one `enguru:decision-extractor` per chunk, **all in a single message** so they run in parallel. Prompt: `chunk_path: <chunk_path>` and `out_path: <out_path>`, nothing else.
+2. If any are pending, dispatch one `enguru:decision-extractor` per chunk, in batches of **at most 6 per message** (the agents in one message run in parallel; send the next batch once a batch replies). Prompt: `chunk_path: <chunk_path>` and `out_path: <out_path>`, nothing else. The CLI already caps how many chunks it hands out.
 3. Run `enguru digest merge`.
 4. In one line each, only if they apply: `fallback_chunks` is non-empty ("some sessions were read with keyword rules instead of the extractor"), or there were no transcripts (`transcripts_dir` false, or prep had no `pending` and no `cached`): "No coding-session transcripts found, so questions about why decisions were made will be limited."
 
