@@ -12,6 +12,8 @@ THOROUGH_CONCEPTS = 12
 THOROUGH_QUESTIONS = 2
 REVISIT_PER_SESSION = 2
 MAX_FOLLOWUPS = 3
+# Finding statuses whose code change sends the finding to a fix check first.
+RECHECKABLE = ("open", "completed", "in_progress", "revisit")
 DIFFICULTIES = ["foundational", "intermediate", "advanced"]
 
 DIGEST_REL = ".enguru/digest.json"
@@ -233,7 +235,7 @@ def _mark_staleness(repo, prog, idx):
     for f in _confirmed(idx):
         cid = f["concept_id"]
         st = dict(_finding_state(prog, cid))
-        if cid in stale and st["status"] in ("open", "completed"):
+        if cid in stale and st["status"] in RECHECKABLE:
             st["prev_status"] = st["status"]
             st["status"] = "recheck"
             prog["findings"][cid] = st
@@ -332,6 +334,7 @@ def end_session(repo, now=None) -> dict:
         for f in _confirmed(idx):
             cid = f["concept_id"]
             if (f.get("severity") == "critical" and cid not in explained
+                    and not _finding_state(prog, cid).get("explained")
                     and _finding_state(prog, cid)["status"] in ("open", "in_progress")):
                 c = idx["concepts"].get(cid, {}).get("concept", {})
                 undisclosed.append({"concept_id": cid, "title": c.get("title", ""),
@@ -473,15 +476,59 @@ def _all_banks(repo):
     return tm, out
 
 
+def _resumable(repo, prog, idx, f):
+    """Whether an in-progress finding from any bank may be resumed now. A finding whose
+    code is gone is retired (or skipped this session if only its own file is gone); one
+    whose code changed is marked recheck, so its own scope's verify_fix handles it."""
+    cid = f["concept_id"]
+    entry = idx["concepts"].get(cid)
+    if entry is None or cid in prog["current"]["skipped"]:
+        return False
+    stale, retired = bank.stale_concepts(repo, [entry["concept"]])
+    if retired:
+        _retire(prog, cid)
+        return False
+    if not (Path(repo) / f["lines"]["file"]).is_file():
+        prog["current"]["skipped"][cid] = "finding_file_missing"
+        return False
+    if stale:
+        st = dict(_finding_state(prog, cid))
+        st["prev_status"], st["status"] = st["status"], "recheck"
+        prog["findings"][cid] = st
+        return False
+    return True
+
+
 def _resume_ladder(repo, prog, sid):
     """A ladder stopped partway (in_progress) in any scope resumes first, at its saved rung."""
     if not any(f.get("status") == "in_progress" for f in prog["findings"].values()):
         return None
     tm, banks = _all_banks(repo)
     idx = _index(tm, banks)
+    before = json.dumps(prog, sort_keys=True)
     idx["findings"] = [f for f in idx["findings"]
-                       if _finding_state(prog, f["concept_id"])["status"] == "in_progress"]
+                       if _finding_state(prog, f["concept_id"])["status"] == "in_progress"
+                       and f.get("verdict") == "confirmed" and _resumable(repo, prog, idx, f)]
+    if json.dumps(prog, sort_keys=True) != before:
+        _save(repo, prog)
     return _next_ladder(prog, idx, sid)
+
+
+def _revisit_ladder(repo, prog, idx, cid):
+    """A finding explained by last resort comes back through the revisit step: its ladder
+    from rung 1, without the announcement."""
+    if _finding_state(prog, cid)["status"] != "revisit":
+        return None
+    f = next((f for f in _confirmed(idx) if f["concept_id"] == cid), None)
+    if f is None:
+        return None
+    cur = prog["current"]
+    cur["served_concepts"].append(cid)
+    cur["revisit_served"].append(cid)
+    _save(repo, prog)
+    return {"action": "ladder", "concept_id": cid, "rung": 1, "step": f["ladder"][0],
+            "ladder_length": len(f["ladder"]), "severity": f["severity"], "announce": False,
+            "revisit": True, "finding": f}
 
 
 def _open_finding_concepts(prog, idx):
@@ -542,7 +589,8 @@ def next_item(repo) -> dict:
             if (cid in cur["served_concepts"] or cid not in idx["concepts"] or cid in busy
                     or _concept_status(prog, cid) == "retired"):
                 continue
-            item = _serve(repo, prog, idx, cid, revisit=True)
+            item = (_revisit_ladder(repo, prog, idx, cid)
+                    or _serve(repo, prog, idx, cid, revisit=True))
             if item:
                 return item
 
@@ -634,6 +682,7 @@ def record(repo, rec) -> dict:
         errs = _kind_rules(rec)
     if errs:
         raise ProgressError("state_corrupt", "invalid record: " + "; ".join(errs))
+    rec = dict(rec, timestamp=_now())  # the CLI's clock, never the caller's
     prog = load(repo)
     session = _require_session(repo, prog)
     if rec["session_id"] != session["id"]:
@@ -661,7 +710,9 @@ def record(repo, rec) -> dict:
     elif rec["question_kind"] == "finding":
         st = prog["findings"].setdefault(cid, {"status": "open", "rung": 1})
         if rec.get("revealed"):
-            st.update(status="open", rung=1)
+            # Explained by last resort: back to the revisit queue (spec 9.5), not to the
+            # findings-first slot; no longer an undisclosed issue.
+            st.update(status="revisit", rung=1, explained=True)
             _add_revisit(prog, cid)
         else:
             st["status"] = "completed"

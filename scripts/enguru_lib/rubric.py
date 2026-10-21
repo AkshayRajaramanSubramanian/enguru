@@ -254,7 +254,8 @@ def cert_levels(repo, save=False, today=None) -> dict:
     open_critical = sum(
         1 for cid, f in bank_f.items()
         if f.get("severity") == "critical"
-        and prog["findings"].get(cid, {}).get("status", "open") in ("open", "in_progress"))
+        and prog["findings"].get(cid, {}).get("status", "open") in ("open", "in_progress")
+        and not prog["findings"].get(cid, {}).get("explained"))
     out = {"skills": skill_levels(prog["answers"], cfg),
            "evidence": skill_evidence(prog["answers"], cfg),
            "previous": _previous(repo / paths.STATE_DIRNAME / "certificates", today),

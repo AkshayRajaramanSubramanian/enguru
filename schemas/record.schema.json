@@ -144,8 +144,7 @@
   "required": [
     "kind",
     "session_id",
-    "concept_id",
-    "timestamp"
+    "concept_id"
   ],
   "additionalProperties": false
 }

@@ -59,6 +59,7 @@ One subsection per skill, in the order above:
 For each item in `findings`, by `concept_id`:
 - `completed`: "discovered at step `discovered_at` of `ladder_length`, open (not yet fixed)".
 - `fixed`: "discovered at step `discovered_at` of `ladder_length`, fixed", or "fixed (not worked through in an interview)" when `discovered_at` is `null`.
+- `revisit`: "explained (last resort), revisit pending".
 - `open`, `in_progress` or `recheck`: "open, not yet discovered" (for `in_progress`, add "reached step `rung` of `ladder_length`"). Say "No real findings so far." if the list is empty.
 
 ### 4. Open items

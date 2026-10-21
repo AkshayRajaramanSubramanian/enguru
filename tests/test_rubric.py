@@ -216,12 +216,16 @@ def test_cli_cert_levels(tmp_path):
     answers = [mk(i, scope="diff", range_id="r%d" % (i % 2)) for i in range(6)]
     prog = {"version": 1, "sessions": [], "answers": answers, "concepts": {},
             "revisit": ["x"], "findings": {"f1": {"status": "in_progress", "rung": 2},
-                                           "f2": {"status": "completed", "rung": 1}},
+                                           "f2": {"status": "completed", "rung": 1},
+                                           "f3": {"status": "revisit", "rung": 1, "explained": True},
+                                           "f4": {"status": "in_progress", "rung": 2, "explained": True}},
             "current": None}
     _write(sd / "progress.json", prog)
     _write(sd / "banks" / "diff" / "r0.json", {"findings": [
         {"concept_id": "f1", "verdict": "confirmed", "severity": "critical", "ladder": ["a", "b", "c"]},
-        {"concept_id": "f2", "verdict": "confirmed", "severity": "minor", "ladder": ["a", "b"]}]})
+        {"concept_id": "f2", "verdict": "confirmed", "severity": "minor", "ladder": ["a", "b"]},
+        {"concept_id": "f3", "verdict": "confirmed", "severity": "critical", "ladder": ["a", "b"]},
+        {"concept_id": "f4", "verdict": "confirmed", "severity": "critical", "ladder": ["a", "b"]}]})
     _write(sd / "certificates" / "2020-01-01.json", {"date": "2020-01-01", "skills": {"comprehension": {"level": "novice"}}})
     out = run_cli(["cert", "levels"], tmp_path)
     assert out["skills"]["comprehension"]["scored"] == 6
@@ -237,7 +241,9 @@ def test_cli_cert_levels(tmp_path):
         "revealed": None}
     assert out["evidence"]["systems_thinking"] == []
     assert out["revisit_count"] == 1
-    assert out["open_critical"] == 1
+    assert out["open_critical"] == 1  # f3 and f4 were explained by last resort
+    assert {"concept_id": "f3", "status": "revisit", "rung": 1, "ladder_length": 2,
+            "discovered_at": None} in out["findings"]
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     assert not (sd / "certificates" / (today + ".json")).exists()
     out = run_cli(["cert", "levels", "--save"], tmp_path)

@@ -267,23 +267,40 @@ def test_skip_and_followup_cap_send_to_revisit(tmp_path):
     assert load_progress(repo)["revisit"] == ["c2"]
 
 
-def test_revealed_finding_returns_to_revisit_open(tmp_path):
-    b = make_bank(["c1"], [finding("f1")])
+def test_revealed_finding_goes_to_revisit_queue_not_findings_first(tmp_path):
+    b = make_bank(["c1", "c2"], [finding("f1"), finding("f2")])
     repo, scope, s = start_diff(tmp_path, b)
     sid = s["session_id"]
+    assert progress.next_item(repo)["concept_id"] == "f1"
     progress.record(repo, rec(sid, "f1", None, "incorrect", kind="ladder_progress",
                               qkind="finding", ladder_rung_reached=3, ladder_length=3))
     r = finish_ladder(repo, sid, "f1", revealed=True)
-    assert r == {"ok": True, "concept_status": "open"}
+    assert r == {"ok": True, "concept_status": "revisit"}
     p = load_progress(repo)
-    assert p["findings"]["f1"]["status"] == "open" and p["findings"]["f1"]["rung"] == 1
+    assert p["findings"]["f1"]["status"] == "revisit" and p["findings"]["f1"]["rung"] == 1
     assert "f1" in p["revisit"]
+    assert progress.next_item(repo)["concept_id"] == "f2"
+    finish_ladder(repo, sid, "f2", revealed=True)
     item = progress.next_item(repo)
     assert item["action"] == "ask" and item["question"]["concept_id"] == "c1"
     restart(repo, scope)
+    # findings-first skips revisit findings; the capped revisit step serves them
     item = progress.next_item(repo)
     assert item["action"] == "ladder" and item["concept_id"] == "f1"
-    assert item["rung"] == 1 and item["announce"] is True
+    assert item["rung"] == 1 and item["announce"] is False and item["revisit"] is True
+    sid2 = load_progress(repo)["current"]["session_id"]
+    progress.record(repo, rec(sid2, "f1", None, "incorrect", kind="ladder_progress",
+                              qkind="finding", ladder_rung_reached=2, ladder_length=3))
+    item = progress.next_item(repo)  # the revisit ladder continues at its new rung
+    assert item["action"] == "ladder" and item["concept_id"] == "f1" and item["rung"] == 2
+    progress.record(repo, rec(sid2, "f1", None, "correct", qkind="finding",
+                              ladder_rung_reached=2, ladder_length=3))
+    item = progress.next_item(repo)
+    assert item["action"] == "ladder" and item["concept_id"] == "f2" and item["revisit"] is True
+    finish_ladder(repo, sid2, "f2", revealed=True)
+    item = progress.next_item(repo)
+    assert item["action"] != "ladder" and item["concept_id"] == "c1"  # cap of 2 reached
+    assert load_progress(repo)["findings"]["f1"]["status"] == "completed"
 
 
 def test_ladder_progress_resumes_at_saved_rung(tmp_path):
@@ -503,11 +520,13 @@ def test_project_mode_topic_map_module_flow(tmp_path):
     assert restart(repo, digest.Scope("project"), None)["module_id"] == "m2"
 
 
-def test_suggest_certificate_counts_since_last_certificate(tmp_path):
+def test_suggest_certificate_counts_since_last_certificate(tmp_path, monkeypatch):
     repo, scope, s = start_diff(tmp_path, make_bank(["c1"]))
     sid = s["session_id"]
     for day in ("2026-10-01", "2026-10-05", "2026-10-06"):
-        progress.record(repo, rec(sid, "c1", "q-c1-1", "partial", timestamp=day + "T09:00:00Z"))
+        monkeypatch.setattr(progress, "_now", lambda d=day: d + "T09:00:00Z")
+        progress.record(repo, rec(sid, "c1", "q-c1-1", "partial"))
+    monkeypatch.setattr(progress, "_now", lambda: TS)
     for i in range(5):
         progress.record(repo, rec(sid, "c1", "q-c1-1", "partial"))
     progress.record(repo, rec(sid, "c1", "q-c1-1", "skipped"))
@@ -755,12 +774,12 @@ def test_critical_finding_explained_by_last_resort_is_not_undisclosed(tmp_path):
     sid = s["session_id"]
     progress.record(repo, rec(sid, "f-crit", None, "dont_know", qkind="finding",
                               ladder_rung_reached=3, ladder_length=3, revealed=True))
-    assert load_progress(repo)["findings"]["f-crit"]["status"] == "open"
+    assert load_progress(repo)["findings"]["f-crit"]["status"] == "revisit"
     out = progress.end_session(repo)
     assert [u["concept_id"] for u in out["undisclosed_critical"]] == ["f-crit2"]
-    s2 = progress.start_session(repo, scope, "quick")  # a later session that doesn't explain it
+    progress.start_session(repo, scope, "quick")  # a later session: still explained
     out = progress.end_session(repo)
-    assert sorted(u["concept_id"] for u in out["undisclosed_critical"]) == ["f-crit", "f-crit2"]
+    assert [u["concept_id"] for u in out["undisclosed_critical"]] == ["f-crit2"]
 
 
 def test_cli_bank_promote_only_moves_valid_builds(tmp_path):
@@ -824,3 +843,66 @@ def test_cli_record_and_keylog_take_json_as_an_argument(tmp_path):
     kl = {"question_id": "q", "issue": "i", "evidence": "e"}
     assert run_cli(["keylog", "add", json.dumps(kl)], repo) == {"ok": True}
     assert (Path(repo) / ".enguru" / "keylog.jsonl").read_text().count("\n") == 1
+
+
+def test_record_stamps_its_own_timestamp(tmp_path, monkeypatch):
+    repo, scope, s = start_diff(tmp_path, make_bank(["c1"]))
+    monkeypatch.setattr(progress, "_now", lambda: "2026-10-21T12:34:56Z")
+    r = rec(s["session_id"], "c1", "q-c1-1", "partial", timestamp="1999-01-01T00:00:00Z")
+    progress.record(repo, r)
+    r2 = rec(s["session_id"], "c1", "q-c1-1", "partial")
+    del r2["timestamp"]
+    progress.record(repo, r2)
+    assert [a["timestamp"] for a in load_progress(repo)["answers"]] == ["2026-10-21T12:34:56Z"] * 2
+
+
+def _diff_finding_in_progress(tmp_path, extra_file):
+    """A diff-session finding on `extra_file`, stopped at rung 2, with sealed evidence."""
+    repo = diff_repo(tmp_path, {extra_file: LINES, "keep.py": LINES})
+    f = finding("d-f", "critical", rungs=3, file=extra_file)
+    b = make_bank(["c1"], [f])
+    b["concepts"][-1]["evidence_refs"] = [{"file": extra_file, "lines": [1, 2]},
+                                          {"file": "keep.py", "lines": [1, 2]}]
+    repo, scope, s = start_diff(tmp_path, b, repo=repo, seal=True)
+    progress.record(repo, rec(s["session_id"], "d-f", None, "incorrect", kind="ladder_progress",
+                              qkind="finding", ladder_rung_reached=2, ladder_length=3))
+    progress.end_session(repo)
+    return repo
+
+
+def _project_session_with_module(repo):
+    s = progress.start_session(repo, digest.Scope("project"), None)
+    pdir = Path(repo) / ".enguru" / "banks" / "project"
+    write_bank(pdir / "topic-map.json",
+               {"modules": [{"id": "m1", "title": "M1", "concepts": [concept("a")]}]})
+    write_bank(pdir / "m1.json", make_bank(["a"], scope_key="project"))
+    return s
+
+
+def test_resume_skips_finding_whose_file_is_missing_in_the_checkout(tmp_path):
+    repo = _diff_finding_in_progress(tmp_path, "gone.py")
+    (Path(repo) / "gone.py").unlink()  # e.g. another branch checked out
+    _project_session_with_module(repo)
+    item = progress.next_item(repo)
+    assert item["action"] == "ask" and item["question"]["concept_id"] == "a"
+    p = load_progress(repo)
+    assert p["current"]["skipped"]["d-f"] == "finding_file_missing"
+    assert p["findings"]["d-f"] == {"status": "in_progress", "rung": 2}  # kept for later
+
+
+def test_resume_retires_finding_whose_code_is_all_gone(tmp_path):
+    repo = _diff_finding_in_progress(tmp_path, "gone.py")
+    for name in ("gone.py", "keep.py", "app.py"):  # every file its evidence hashes cover
+        (Path(repo) / name).unlink()
+    _project_session_with_module(repo)
+    assert progress.next_item(repo)["question"]["concept_id"] == "a"
+    assert load_progress(repo)["concepts"]["d-f"]["status"] == "retired"
+
+
+def test_resume_marks_changed_finding_for_recheck(tmp_path):
+    repo = _diff_finding_in_progress(tmp_path, "mod.py")
+    (Path(repo) / "mod.py").write_text(LINES + "changed\n")
+    _project_session_with_module(repo)
+    assert progress.next_item(repo)["question"]["concept_id"] == "a"
+    st = load_progress(repo)["findings"]["d-f"]
+    assert st["status"] == "recheck" and st["prev_status"] == "in_progress" and st["rung"] == 2

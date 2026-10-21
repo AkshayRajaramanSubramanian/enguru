@@ -10,7 +10,7 @@ If `announce` is true, say this line first, verbatim, on its own:
 
 > This next one is a real issue in your code, not an exercise.
 
-Then present `step.question`. (When `announce` is false you are resuming or moving down; just present the rung's question. When resuming in a new session, say in one line that you are picking up the real issue from last time.)
+Then present `step.question`. (When `announce` is false you are resuming or moving down; just present the rung's question. When resuming in a new session, say in one line that you are picking up the real issue from last time. When the action has `revisit: true`, this real issue was explained by last resort in an earlier session and is back from the revisit queue: say in one line that you are revisiting it, then work the ladder from rung 1 as usual, with no reveal while rungs remain.)
 
 ## 2. Moving down the ladder
 
@@ -21,10 +21,7 @@ Judge each answer against `step.expected_realization`, and against `finding.cons
 - **A wrong answer, "I don't know", or `hint`:** if this is the last rung (`rung == ladder_length`), go to section 4. Otherwise move to the next, narrower rung. Say briefly that it isn't that (no explanation of why, which would reveal it), then record the new rung and call `next`, which returns that rung:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py" record '{"kind": "ladder_progress", "session_id": "<session_id>", "concept_id": "<concept_id>",
- "question_kind": "finding", "ladder_rung_reached": <rung + 1>, "ladder_length": <ladder_length>,
- "scope": "<scope>", "range_id": <range_id or null>, "intensity": <intensity or null>,
- "timestamp": "<YYYY-MM-DDTHH:MM:SSZ>"}'
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py" record '{"kind": "ladder_progress", "session_id": "<session_id>", "concept_id": "<concept_id>", "question_kind": "finding", "ladder_rung_reached": <rung + 1>, "ladder_length": <ladder_length>, "scope": "<scope>", "range_id": <range_id or null>, "intensity": <intensity or null>}'
 ```
 
 Rules:
@@ -40,15 +37,7 @@ Rules:
 Then record:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py" record '{"kind": "answer", "session_id": "<session_id>", "concept_id": "<concept_id>",
- "question_id": null, "question_kind": "finding",
- "style": "review_diff", "skill": "review_judgment", "difficulty": "advanced",
- "outcome": "correct", "must_haves_hit": [], "misconception_stated": false,
- "hints_used": 0, "followups_used": 0,
- "ladder_rung_reached": <rung where they named it>, "ladder_length": <ladder_length>,
- "fix_valid": <true|false>, "revealed": false,
- "scope": "<scope>", "range_id": <range_id or null>, "intensity": <intensity or null>,
- "timestamp": "<YYYY-MM-DDTHH:MM:SSZ>"}'
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/enguru.py" record '{"kind": "answer", "session_id": "<session_id>", "concept_id": "<concept_id>", "question_id": null, "question_kind": "finding", "style": "review_diff", "skill": "review_judgment", "difficulty": "advanced", "outcome": "correct", "must_haves_hit": [], "misconception_stated": false, "hints_used": 0, "followups_used": 0, "ladder_rung_reached": <rung where they named it>, "ladder_length": <ladder_length>, "fix_valid": <true|false>, "revealed": false, "scope": "<scope>", "range_id": <range_id or null>, "intensity": <intensity or null>}'
 ```
 
 Close with the file and lines and one sentence on why it matters, then call `next`.
