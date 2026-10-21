@@ -166,6 +166,24 @@ def validate_bank(repo, bank: dict, digest: dict) -> list:
     else:
         concepts, questions, findings = bank["concepts"], bank["questions"], bank["findings"]
 
+    # Ids end up in work-file names and shell arguments (rm -f, --ids, --out).
+    def safe(item_id, value, what):
+        if not paths.safe_id(value):
+            add(item_id, "unsafe id in %s: %r (letters, digits, . _ - only; no ..)"
+                % (what, value))
+
+    for m in bank.get("modules", []) if topic else []:
+        safe(m["id"], m["id"], "module id")
+    for c in concepts:
+        safe(c["id"], c["id"], "concept id")
+        if "module" in c:
+            safe(c["id"], c["module"], "concept module")
+    for q in questions:
+        safe(q["id"], q["id"], "question id")
+        safe(q["id"], q["concept_id"], "question concept_id")
+    for f in findings:
+        safe(f["concept_id"], f["concept_id"], "finding concept_id")
+
     for c in concepts:
         for r in c["evidence_refs"]:
             check(c["id"], r)

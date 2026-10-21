@@ -157,6 +157,7 @@ def cmd_bank_seal(args):
     from enguru_lib import bank
     repo = _repo_root(os.getcwd())
     path = _bank_path(repo, args.path)
+    _inside_state(repo, path, "bank path")
     _load_bank_shaped(path, allow_topic_map=True)
     ids = [i for i in args.ids.split(",") if i] if args.ids is not None else None
     bank.seal(repo, path, ids)
@@ -167,6 +168,7 @@ def cmd_bank_drop(args):
     from enguru_lib import bank
     repo = _repo_root(os.getcwd())
     path = _bank_path(repo, args.path)
+    _inside_state(repo, path, "bank path")
     _load_bank_shaped(path)
     ids = [i for i in args.ids.split(",") if i]
     bank.drop_items(path, ids)
@@ -177,6 +179,7 @@ def cmd_bank_apply_verdicts(args):
     from enguru_lib import bank
     repo = _repo_root(os.getcwd())
     path = _bank_path(repo, args.path)
+    _inside_state(repo, path, "bank path")
     _load_bank_shaped(path)
     emit(bank.apply_verdicts(repo, path))
 
@@ -200,6 +203,8 @@ def cmd_bank_merge(args):
     from enguru_lib import bank
     repo = _repo_root(os.getcwd())
     path, part = _bank_path(repo, args.path), _bank_path(repo, args.partial)
+    _inside_state(repo, path, "bank path")
+    _inside_state(repo, part, "partial path")
     if path.exists():
         _load_bank_shaped(path)
     _load_bank_shaped(part)

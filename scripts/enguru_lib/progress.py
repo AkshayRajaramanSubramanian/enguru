@@ -22,7 +22,6 @@ TOPIC_REL = ".enguru/banks/project/topic-map.json"
 
 _RISKY = re.compile(r"(?i)(auth|login|session|token|password|payment|billing|invoice|charge|"
                     r"stripe|checkout|migrat|schema|permission|admin|crypto|secret)")
-_SAFE_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
 _CERT_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -163,7 +162,7 @@ def _load_scope(repo, session):
         module_banks, banks = {}, []
         for m in (tm or {}).get("modules", []):
             mid = m.get("id")
-            if not isinstance(mid, str) or not _SAFE_NAME.match(mid):
+            if not paths.safe_id(mid):
                 continue
             b = _read_bank(repo, _module_rel(mid))
             if b is not None:
@@ -388,7 +387,7 @@ def _rebuild(repo, prog, idx, cid, reason):
     bank_path = entry["bank"]
     if bank_path == TOPIC_REL:  # only in the topic map: merge into its module bank
         module = entry["concept"].get("module")
-        bank_path = _module_rel(module) if isinstance(module, str) and _SAFE_NAME.match(module) else None
+        bank_path = _module_rel(module) if paths.safe_id(module) else None
     if bank_path is None or cur["rebuilds"].get(cid, 0) >= 1:
         cur["skipped"][cid] = "rebuild_failed:" + reason if bank_path else "no_module_bank"
         _save(repo, prog)
@@ -477,7 +476,7 @@ def _all_banks(repo):
     """[(rel, bank)] for every bank on disk: project module banks and diff banks."""
     tm = _read_bank(repo, TOPIC_REL)
     rels = [_module_rel(m.get("id")) for m in (tm or {}).get("modules", [])
-            if isinstance(m.get("id"), str) and _SAFE_NAME.match(m["id"])]
+            if paths.safe_id(m.get("id"))]
     diff_dir = Path(repo) / ".enguru" / "banks" / "diff"
     if diff_dir.is_dir():
         rels += [".enguru/banks/diff/%s" % p.name for p in sorted(diff_dir.glob("*.json"))]

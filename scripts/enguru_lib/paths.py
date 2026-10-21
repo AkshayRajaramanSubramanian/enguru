@@ -1,12 +1,21 @@
 """State directory, gitignore, atomic JSON and lock primitives."""
 import json
 import os
+import re
 import shutil
 import time
 from pathlib import Path
 
 LOCK_STALE_SECONDS = 14400
 STATE_DIRNAME = ".enguru"
+
+
+_SAFE_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
+
+
+def safe_id(value) -> bool:
+    """True for ids that are safe to use in a file name and a shell argument."""
+    return isinstance(value, str) and bool(_SAFE_ID.match(value)) and ".." not in value
 
 
 class StateCorrupt(Exception):

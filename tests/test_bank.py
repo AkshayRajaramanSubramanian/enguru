@@ -135,7 +135,8 @@ def test_seal_then_stale_after_edit(tmp_path):
     b = base_bank()
     b["concepts"][0]["evidence_refs"].append({"file": "nope.py", "lines": [1, 1]})
     b["questions"][0]["answer_key"]["must_have"][0]["evidence_ref"] = {"file": "b.py", "lines": [1, 1]}
-    bp = tmp_path / "bank.json"
+    bp = repo / ".enguru" / "bank.json"
+    bp.parent.mkdir()
     bp.write_text(json.dumps(b))
     bank.seal(repo, bp)
     sealed = json.loads(bp.read_text())
@@ -150,7 +151,8 @@ def test_seal_then_stale_after_edit(tmp_path):
 def test_retired_when_files_deleted(tmp_path):
     repo = mk(tmp_path)
     b = base_bank()
-    bp = tmp_path / "bank.json"
+    bp = repo / ".enguru" / "bank.json"
+    bp.parent.mkdir()
     bp.write_text(json.dumps(b))
     bank.seal(repo, bp)
     sealed = json.loads(bp.read_text())
@@ -266,7 +268,8 @@ def test_cli_bank_commands(tmp_path):
 
 def test_merge_partial_replaces_by_id_and_adds_new(tmp_path):
     repo = mk(tmp_path)
-    bp = repo / "bank.json"
+    bp = repo / ".enguru" / "bank.json"
+    bp.parent.mkdir()
     paths.atomic_write_json(bp, base_bank())
     part = copy.deepcopy(base_bank())
     part["concepts"][0]["title"] = "New title"
@@ -275,22 +278,23 @@ def test_merge_partial_replaces_by_id_and_adds_new(tmp_path):
     part["questions"][0]["prompt"] = "replaced"
     part["questions"].append(q2)
     part["findings"][0]["severity"] = "critical"
-    pp = repo / "part.json"
+    pp = repo / ".enguru" / "part.json"
     paths.atomic_write_json(pp, part)
     bank.merge_partial(bp, pp)
     out = paths.read_json(bp)
     assert [c["title"] for c in out["concepts"]] == ["New title"]
     assert [(q["id"], q["prompt"]) for q in out["questions"]] == [("q1", "replaced"), ("q2", "p")]
     assert [f["severity"] for f in out["findings"]] == ["critical"]
-    run_cli(["bank", "merge", "bank.json", "part.json"], repo)
+    run_cli(["bank", "merge", ".enguru/bank.json", ".enguru/part.json"], repo)
 
 
 def test_merge_partial_creates_missing_target_bank(tmp_path):
     repo = mk(tmp_path)
-    pp = repo / "part.json"
+    pp = repo / ".enguru" / "part.json"
+    pp.parent.mkdir()
     paths.atomic_write_json(pp, base_bank())
-    run_cli(["bank", "merge", "new/m9.json", "part.json"], repo)
-    out = paths.read_json(repo / "new" / "m9.json")
+    run_cli(["bank", "merge", ".enguru/new/m9.json", ".enguru/part.json"], repo)
+    out = paths.read_json(repo / ".enguru" / "new" / "m9.json")
     assert out == {"scope_key": "project", "concepts": base_bank()["concepts"],
                    "questions": base_bank()["questions"], "findings": base_bank()["findings"]}
 
@@ -299,7 +303,8 @@ def test_seal_with_ids_only_rehashes_those_concepts(tmp_path):
     repo = mk(tmp_path)
     b = base_bank()
     b["concepts"].append(dict(copy.deepcopy(b["concepts"][0]), id="c2"))
-    bp = tmp_path / "bank.json"
+    bp = repo / ".enguru" / "bank.json"
+    bp.parent.mkdir()
     bp.write_text(json.dumps(b))
     bank.seal(repo, bp)
     (repo / "a.py").write_text("changed\n")
@@ -332,22 +337,63 @@ def test_cli_bank_finding_writes_one_finding(tmp_path):
 
 def test_mutating_bank_commands_reject_wrong_shapes(tmp_path):
     repo = mk(tmp_path)
+    (repo / ".enguru").mkdir()
     c = base_bank()["concepts"][0]
     tm = {"modules": [{"id": "m1", "title": "t", "concepts": [c]}]}
-    (repo / "tm.json").write_text(json.dumps(tm))
-    (repo / "bad.json").write_text(json.dumps({"concepts": [{"id": "c1"}], "questions": "x"}))
-    (repo / "list.json").write_text("[]")
-    (repo / "ok.json").write_text(json.dumps(base_bank()))
+    (repo / ".enguru" / "tm.json").write_text(json.dumps(tm))
+    (repo / ".enguru" / "bad.json").write_text(json.dumps({"concepts": [{"id": "c1"}], "questions": "x"}))
+    (repo / ".enguru" / "list.json").write_text("[]")
+    (repo / ".enguru" / "ok.json").write_text(json.dumps(base_bank()))
     cmds = [["drop", "{p}", "--ids", "c1"], ["apply-verdicts", "{p}"],
-            ["merge", "ok.json", "{p}"], ["merge", "{p}", "ok.json"],
+            ["merge", ".enguru/ok.json", "{p}"], ["merge", "{p}", ".enguru/ok.json"],
             ["finding", "{p}", "c1", "--out", ".enguru/f.json"]]
     for p in ("tm.json", "bad.json", "list.json"):
         for cmd in cmds:
-            args = ["bank"] + [a.format(p=p) for a in cmd]
+            args = ["bank"] + [a.format(p=".enguru/" + p) for a in cmd]
             code, out = run_cli_raw(args, repo)
             assert code == 2 and out["error"] == "state_corrupt", (args, out)
     for p in ("bad.json", "list.json"):
-        code, out = run_cli_raw(["bank", "seal", p], repo)
+        code, out = run_cli_raw(["bank", "seal", ".enguru/" + p], repo)
         assert code == 2 and out["error"] == "state_corrupt"
-    assert run_cli(["bank", "seal", "tm.json"], repo) == {"ok": True}
+    assert run_cli(["bank", "seal", ".enguru/tm.json"], repo) == {"ok": True}
+    assert json.loads((repo / ".enguru" / "ok.json").read_text()) == base_bank()
+
+
+def test_unsafe_ids_rejected(tmp_path):
+    repo = mk(tmp_path)
+    for bad in ("../x", "a;rm -rf ~", "-c1", "a/b", "x..y", " c1", ""):
+        b = base_bank()
+        b["concepts"][0]["id"] = bad
+        b["questions"][0]["concept_id"] = bad
+        b["findings"][0]["concept_id"] = bad
+        ids = {p["item_id"] for p in bank.validate_bank(repo, b, {"events": []})
+               if "unsafe id" in p["reason"]}
+        assert bad in ids, bad
+        b = base_bank()
+        b["questions"][0]["id"] = bad
+        assert any("unsafe id" in p["reason"] for p in bank.validate_bank(repo, b, {"events": []}))
+    b = base_bank()
+    b["concepts"][0]["module"] = "../../etc"
+    assert any("unsafe id" in p["reason"] for p in bank.validate_bank(repo, b, {"events": []}))
+    c = base_bank()["concepts"][0]
+    tm = {"modules": [{"id": "m%d" % i, "title": "t", "concepts": [dict(c, id="c%d" % i)] * 3}
+                      for i in range(4)]}
+    assert bank.validate_bank(repo, tm, {"events": []}) == []
+    tm["modules"][0]["id"] = "../m1"
+    assert any("unsafe id" in p["reason"] for p in bank.validate_bank(repo, tm, {"events": []}))
+    assert bank.validate_bank(repo, base_bank(), {"events": []}) == []
+
+
+def test_mutating_bank_commands_stay_inside_state_dir(tmp_path):
+    repo = mk(tmp_path)
+    (repo / "ok.json").write_text(json.dumps(base_bank()))
+    inside = repo / ".enguru" / "ok.json"
+    inside.parent.mkdir()
+    inside.write_text(json.dumps(base_bank()))
+    for args in (["seal", "ok.json"], ["drop", "ok.json", "--ids", "q1"],
+                 ["apply-verdicts", "ok.json"], ["merge", "ok.json", ".enguru/ok.json"],
+                 ["merge", ".enguru/ok.json", "ok.json"], ["merge", "../out.json", ".enguru/ok.json"]):
+        code, out = run_cli_raw(["bank"] + args, repo)
+        assert code == 2 and out["error"] == "state_corrupt" and ".enguru" in out["message"], args
     assert json.loads((repo / "ok.json").read_text()) == base_bank()
+    assert not (tmp_path / "out.json").exists()
