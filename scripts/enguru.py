@@ -47,10 +47,39 @@ def cmd_check(args):
     })
 
 
+def _repo_root(cwd):
+    try:
+        r = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=cwd,
+                           capture_output=True, text=True)
+    except OSError:
+        return Path(cwd)
+    return Path(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else Path(cwd)
+
+
+def cmd_digest_prep(args):
+    from enguru_lib import digest
+    repo = _repo_root(os.getcwd())
+    root = Path(args.transcripts_root) if args.transcripts_root else Path.home() / ".claude" / "projects"
+    try:
+        scope = digest.resolve_scope(repo, not args.diff, args.range, args.uncommitted)
+        emit(digest.prep(repo, scope, root))
+    except digest.DigestError as e:
+        fail(e.code, e.message)
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="enguru")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("check", help="environment check").set_defaults(func=cmd_check)
+    dg = sub.add_parser("digest", help="digest commands").add_subparsers(dest="dcmd", required=True)
+    pp = dg.add_parser("prep", help="write transcript chunks and rule events")
+    mode = pp.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--project", action="store_true")
+    mode.add_argument("--diff", action="store_true")
+    pp.add_argument("--range")
+    pp.add_argument("--uncommitted", action="store_true")
+    pp.add_argument("--transcripts-root", help=argparse.SUPPRESS)
+    pp.set_defaults(func=cmd_digest_prep)
     return p
 
 
